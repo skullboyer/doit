@@ -1,0 +1,3193 @@
+#!/usr/bin/bash
+#@create:Sat Feb  8 10:18:32 CST 2025 by skull  ver:25.2.8.10.18
+# Copyright © 2024 <copyright skull.gu@gmail.com>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+# and associated documentation files (the “Software”), to deal in the Software without
+# restriction, including without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+set +e
+
+script_name=$(basename "${BASH_SOURCE[0]%.*}")
+
+function help_info {
+cat <<EOFHELP
+*****************************************************************************************************
+** 如果是第一次使用，请在本文件所在目录使用命令 './$script_name hello <user-name>，根据提示操作即可 ©skull  **
+*****************************************************************************************************
+
+usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
+
+初始化代码仓库
+$script_name init {branch_name} {manifest_xml}
+    branch_name         manifest仓分支，缺省则为master分支
+    manifest_xml        要切换的xml配置文件，缺省则为huamiOS.xml
+
+同步代码仓库
+$script_name sync [--depth] [--rebase]
+    --depth             同步代码前净化代码仓(包括删除未跟踪内容)，后跟数字为回滚深度
+    --rebase            在当前节点下同步代码附带变基本地提交
+    tips:               缺省参数则强制同步远端而丢弃本地
+
+xml操作
+$script_name xml [-s] [-g] [-d]
+    -s [-s/switch] [--branch] [--xml] {fallback-depth}
+        --branch            切manifests仓分支
+        --xml               要切换的xml配置文件
+        {fallback-depth}    切换前净化代码仓的回滚深度，此参数可选
+    -g [-g/generate]    生成当前代码节点xml
+        node                打包代码指定节点xml
+                            后可直接绝对时间'2024-08-24'，或相对时间'1w'
+                            缺省则根据提示输入，若输入为空则节点即为当前日期
+    -d [-d/diff] {old_xml} {new_xml}
+        old_xml             生成代码差异changelog的旧节点xml
+        new_xml             生成代码差异changelog的新节点xml
+
+构建项目
+$script_name make [-d] [-o] [-a] [-t] [-r] [-s] [-v] [-fw] [--backup] [--restore]
+    -d  delta           增量编译
+    -o  ota             ota升级包编译
+    -a  all             全编译，同'-o'选项一起使用，如T3需先编译小核再编译大核
+    -t  tiny            制作差分包
+    -r  release         release版本，缺省为debug版本
+    -s  select          选择要构建的项目，缺省则在后面选择
+    -v  version         指定版本号，版本号写在最后，缺省则为默认版本号：年.月.日.时.分
+    -fw firware-ota     单固件OTA包
+    --backup            备份ota，为快速验证
+    --restore           还原ota，为快速验证
+    --skip              跳过编译，通常用于制作差分包或打固件升级包，如 -t, -fw
+    tips:               缺省则进行代码编译(不带资源)，会将配置和版本号写入文件ota.version，方便追溯
+
+生成gapp工程
+$script_name gapp {module} [-c] [-s]
+    module              指定要生成的gapp工程的模块
+    -c  gapp module     选择要生成的gapp工程的模块
+    -s  select          选择要构建的项目，缺省则在后面选择
+    tips:               如果没有输入有效模块，则默认common模块
+
+编译模拟器
+$script_name simul [make] [--enter] [--remount] [--mount] [--umount] [--gapp] [--backup] [--restore]
+    make                不带选项，非ota全量编译
+        -d  delta           增量编译
+        -o  ota             进行全量ota编译
+    --enter             模拟器启动进入校验
+    --remount           全量编译后重新挂载
+    --mount             挂载资源，可以做快速验证
+    --umount            卸载资源
+    --gapp              替换gapp文件，为快速验证
+    --backup            备份ota，为快速验证
+    --restore           还原ota，为快速验证
+
+复制编译出的固件
+$script_name copy [-t] [-o] [--fast] [-f] [-C] {product}
+    -t  ota             复制ota升级固件到桌面对应项目文件夹
+    -o  only            复制程序固件到对应项目烧录文件夹
+    --fast              拷贝gapp、crc文件
+    -f  force           更新存放固件的目录
+    -C  assign          指定存放固件的项目名，缺省指定则使用 indicator.product
+    product             指定要复制到文件夹的项目名，缺省则在后面选择
+    tips:               缺省选项则复制包括资源在内的固件包到对应项目文件夹
+
+检查代码仓变化
+$script_name diff [-p] [-v] [-i] [-a] [-c] [-x] [--suffix] [--exclude] [--path] [--backup]
+    -p  patch           应用补丁
+        --repo-diff         指定repo.diff所在工程目录
+    -i  ignore          检查仓内工作区所有文件修改情况
+    -a  all             检查仓内所有文件修改情况，包括工作区、暂存区 (未进行编译同'-x'效果)
+    -v  view            检查仓内工作区文件修改情况，同时在终端输出细节，可配合选项--suffix、--exclude使用
+    -c  specify         检查指定文件变化的代码仓，格式：-c --file +file1 +file2 ...
+                        检查指定文件类型变化的代码仓，格式：-c --suffix +type1 +type2 ...
+    -x  untracked       检查仓内变化，包括未跟踪的文件，可使用格式：-x --suffix +type1 +type2 ... 来排除仅特定格式文件变化的仓以缩减有效范围，缺省则排除文件格式为'.gapp'
+    --suffix            加入查看的文件类型，格式：--suffix +type1 +type2 ...
+    --exclude           排除要查看的文件，格式：--exclude -file1 -file2 ...
+    --path              检查指定目录关键字的代码仓文件修改情况，格式：-i/-a[-v] --path +sport +config
+    --backup            备份文件$REPO_DIFF
+    tips:               缺省则检查仓内默认格式c/cc/cpp/h文件修改情况，同时将结果写入文件$REPO_DIFF
+
+处理代码仓暂存
+$script_name stash [-a] [-d] [-ad] [-v] [-vv] [-av] [-m]
+    -a  apply           应用贮藏修改
+    -d  drop            丢弃贮藏修改
+    -ad -a && -d        弹出贮藏修改
+    -v  view            查看贮藏修改
+    -vv view verbose    查看文件级别修改
+    -av view detail     查看具体修改内容，结果存于$REPO_STASH_DIFF
+    -m  messge          贮藏diff命令查询到修改
+    tips:               上述选项之后可加comment来划定范围，执行结果写入文件$REPO_STASH
+
+查询代码仓日志信息
+$script_name query [-s] [-u] [-m] [-p] [--push]
+    -s  string find     查询关键字符串的修改历史，结果写入query_result.txt，格式：-s "string" [repo-path]
+    -p  push            检查仓内未push的提交，查询结果可见$QUERY_LOG
+        --keep              续写多个关键字的未push查询结果
+        {key-word}      可跟仓路径关键字查询，特殊关键字'all'为检查所有仓，缺省则默认是'sport'，必须作为最后参数
+    -u  user            指定代码作者或提交者
+        {depth}             最近几天，默认深度7天
+    -m  message         指定提交时的描述信息
+        {depth}             默认深度7笔
+    --push              推送未push提交到远端仓库，基于-p选项的查询结果，亦可随-p选项一齐使用
+    tips:               缺省所有参数（可指定深度）则查询自己最近一周的提交，查询结果写入文件$REPO_LOG
+
+制作差分包
+$script_name tiny [-p] [-t]
+    -t  ota             复制ota升级固件到配置的ota目录的对应项目文件夹
+    -p  product         指定做差分包的产品，缺省则以上次编译的产品做
+    tips:               项目生成的升级包与bak/[product]文件夹中的升级包做差分包存至目录bak/[product]/diff，同时将上传至桌面文件夹[product]/tiny
+
+代码仓分支操作
+$script_name branch [-v] [-n] [-x] [-d]
+    -v  view            查看指定分支存在的代码仓
+    -n  exclude         查看指定分支不存在的代码仓
+    -x  active          查看指定分支激活的代码仓
+    -d  delete          删除指定分支
+    tips:               上述选项后跟分支名，结果存入branch.temp
+$script_name branch [-s] {target_branch} {multi_branch}
+    -s  switch          切换分支
+        {target_branch}     仅携带这1个参数，在指定仓中切换目标分支
+        {multi_branch}      多变分支名，--f选项时做远端分支，--d选项时做待删除分支，缺省(--f、--d)则表示在指定仓中创建分支，指定仓来自上条branch命令
+        --f                 全仓创建target分支，target_branch multi_branch --f
+        --d                 删除multi分支并切换target，target_branch multi_branch --d
+    tips:               指定仓来源于分支查看命令-v -n -x
+
+同步多笔提交
+$script_name cp [-m] [--undo] [--check] [--fail] [--merge] [--diff]
+    -m                  支持同步的提交信息change-number、change-id、commit-hash、topic
+        [work]              只同步状态为NEW的提交，缺省则忽略状态为ABANDONED的提交，提交状态：ABANDONED、MERGED、NEW
+        --counter           统计代码的修改行数
+    --undo              撤销上次同步的修改
+        [assign]            撤销指定的同步提交，支持commit-id、change-number、change-id、topic、hashtag
+    --check             查询cherry-pick到本地的提交，缺省参数即查看所有
+        [verbose]           查看详细信息，包括提交者、提交时间等
+        [push]              将check结果写入$REPO_DIFF准备提交
+        {time}              查看指定深度的同步提交，使用方法 1：time [n] 或 time=n，2：不使用time 则需要将时间深度作为最后一个参数
+                                绝对时间：HH:MM, YYYY-MM-DD, YYYY-MM-DD HH, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
+                                相对时间：1h: 1 hours ago, 1d: 1 days ago, 1w: 1 weeks ago
+    --fail              检查同步失败的提交
+    --merge             解决完同步的冲突后，完成提交
+    --diff              以check为基准，查看修改明细，结果写入cp_check.diff
+    tips:               topic对应的提交信息见记录topic_packet.txt，同步过程记录见topic_log.txt
+
+提交多仓修改
+$script_name commit [-m] [--log]
+    -m                  推送提交
+        {branch}            提交分支，必要
+        {message}           提交信息，非必要，追加可省
+        {topic}             归集多笔提交的标记，非必要
+    --log               查询代码改动仓库提交log，后跟查询深度
+    tips:               缺省选项参数可在后面输入，执行前须执行diff命令，支持各提交自定义分支、各提交文件选择、是否提交即跳过
+
+工具集合
+$script_name tools [map] [crc] [display] [owner]
+    map                 解析各功能模块空间占用
+        --parse  module     解析指定模块空间占用，后跟模块名
+        --find  keyword     查看当前项目支持的指定关键字相关的模块，后跟模块关键字
+        --exec  keyword     解析指定关键字相关的模块的空间占用，后跟模块关键字
+        --sort              进行空间占用排序，分 RAM 和 ROM
+        tips:               缺省则解析所有模块的空间占用
+    crc
+        file.gapp           计算文件crc
+    display             查询产品显示尺寸，未指定则查询所有
+        --assign            指定具体产品或关键字，缺省则后面输入
+    owner               将分支或节点代码仓对比出的changelog，找出对应的owner附在每个提交的后面
+        --deduplicate       去重 changlog，两节点都提交了、提交后Revert了、Merge了的都认为是重复的
+            [only]              仅做去重处理
+        --module            指定代码仓对应的模块关键字，指定后仅处理该关键字对应的仓库，当前支持关键字 sport，缺省则为全部
+        --assign            指定提交者，缺省则指所有
+        --type              指定提交类型
+            [fix]               修复
+            [feat]              需求
+            [ref]               优化
+        --out-format        指定输出格式，缺省则为text
+            [md]                markdown，便于粘贴至文档
+            [txt]               text，原文简要处理
+            [csv]               excel格式，便于筛选
+            [table]             表格，markdown格式，便于粘贴至文档
+            [html]              网页格式，便于浏览、跳转
+        -v                  同时在终端输出相关信息
+        tips:               缺省则在原文副本添加owner
+
+创建配置文件
+$script_name cfg [--fw-dir] [--mk-product] [--signature]
+    --fw-dir            配置烧写、升级固件存放目录
+        -s  show            展示当前配置的路径
+        -w  write           修改存储路径
+        -p  path            指定生成配置文件存放的路径，缺省则存放在该脚本所在目录
+    --mk-product        创建产品列编译表文件
+        -d  delete          删除历史产品编译列表文件
+        -e  empty           创建空的产品编译列表文件
+    --signature         创建签名存放路径
+        -s  show            展示当前配置的路径
+    tips:               按需修改即可
+
+进行命令补全设置
+$script_name comple [-w] [-p]
+    -w  write env       将补全文件加入环境变量，执行完后需更新环境变量使之生效，source ~/.bashrc
+    -p  path            补全文件存放路径，缺省则存放至用户路径即~
+    tips:               缺省则仅生成补全文件，存放在本脚本所在位置
+
+精简出trace所需的源码
+$script_name code {src-path} {dest-path}
+    src-path            代码仓目录，根目录
+    dest-path           精简后的代码的存放路径（绝对路径），缺省则输出精简源码压缩包至代码仓根目录的上一级
+    tips:               在代码仓根目录的上一级执行本命令，其他按照提示操作
+
+删除本脚本产生的中间文件及编译出的文件
+$script_name clean [--all]
+    --all               删除vmmc.bin及切入build目录下make clean
+    tips:               缺省则仅删除.$script_name和BACKUP
+
+在散列代码仓使用git
+$script_name git {arg}
+    arg                 git支持的命令参数
+    tips:               主要用在未被repo管控的散列代码仓使用git
+
+更新脚本
+$script_name update
+
+EOFHELP
+}
+
+script=$0
+script_name_with_path=$0
+script_path=$(dirname "$0")
+script_name_with_suffix=$(basename "$0")
+script_name=${script_name_with_suffix%.*}
+
+do_cmd=$1
+last_cmd=${!#}
+arg2=$2;arg3=$3;arg4=$4;arg5=$5;arg6=$6;arg7=$7;arg8=$8;arg9=$9
+arg_count=$#
+
+_EXEC_PARAMS=$@
+EXEC_PARAMS=("$@")
+current_path=`pwd`
+BUILD_TYPE=release
+version=`date +"%y.%-m.%-d.%-H.%M"`
+debug_release=debug
+enum_config=(
+mhs003_matterhorn_defconfig
+mhs003_milan_defconfig
+mhs003_pamir_defconfig
+mimxrt595_monaco_defconfig
+mimxrt595_andes_defconfig
+mimxrt595_vienna_defconfig
+mimxrt595_teide_defconfig
+mimxrt595_berlin_defconfig
+)
+enum_product_name=(
+monaco
+swift
+swordfish
+andes
+teide
+vienna
+berlin
+lille
+res_tool
+)
+CFG_IN_DIR="/etc/dit"
+[ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
+[ -f $CFG_IN_DIR/user ] && GERRIT_USER=$(cat $CFG_IN_DIR/user)
+CODE_INFO="code.info"
+OTA_VERSION="ota.version"
+COMMIT_LOG="commit.log"
+CP_LOG="cp.log"
+CP_FAIL="cp.fail"
+CP_CHECK="cp.check"
+CP_UNDO="cp.undo"
+REPO_LOG="repo.log"
+REPO_DIFF="repo.diff"
+REPO_STASH="repo.stash"
+REPO_STASH_DIFF="repo.stash.diff"
+QUERY_LOG="query.log"
+HANDLE_HISTORY="handle.history"
+MAKE_MENU="make.product"
+CHANGELOG_OUT=$current_path/.$script_name"/changelog_out"
+source_dir='build/out/watch@*/binary'
+flash_dir=/mnt/d/work/tools/02_download/pcfire
+ota_dir=/mnt/d/ota
+read_dir=/mnt/d/work/code
+dir_cfg=$script_name-dir.cfg
+[ -f $HOME/.$script_name/signature.path ] && sig_file=$(<$HOME/.$script_name/signature.path) || sig_file="/mnt/d/work/sign/sign.pem"
+log_message() {
+    echo -e "[$(date '+%H:%M:%S')] $1"
+}
+sub_help() {
+    $script help >.$script_name/help.info
+    line_number=$(grep -n "$script_name $1" .$script_name/help.info |cut -d ':' -f1)
+    awk -v start_line=$line_number 'NR>=start_line && /^$/{exit} NR>=start_line' .$script_name/help.info
+    rm .$script_name/help.info
+}
+option_check() {
+    [[ $1 = 'must' ]] && echo -e "\e[47m\e[31m!!Please check the input\e[0m" && exit -1
+    [ -z $1 ] && return 0
+    [ $1 = '?' ] && return 0
+    [ $1 = '@' ] && return 0
+    help_info >.$script_name/help.info
+    args=$(grep -n "$script_name $do_cmd" .$script_name/help.info |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+    readarray -t args <<<$args
+    hint=false
+    for arg in ${args[@]}
+    do
+        [ $arg = $1 ] && hint=true && break
+    done
+    rm .$script_name/help.info
+    [ $hint = false ] && echo -e "\a\e[43m!!Please check command option.\e[0m" && exit -1
+}
+prompt_tone() {
+    limit=$1
+    cnt=0
+    interval=1
+    if [ $limit -lt 0 ]; then
+        interval=0.3
+        limit=5
+    fi
+    until [ $cnt -gt $limit ]
+    do
+        sleep $interval
+        echo -e "\a\c"
+        let cnt+=1
+    done
+}
+progress_bar() {
+while :
+do
+    echo -n '#'
+    sleep 0.5
+done
+}
+kill_progress() {
+    {
+        ps -ef |grep "$script_name" |grep -v grep |awk '{print $2}' | xargs kill -9 2>&1 >/dev/null
+    } &
+}
+spin_percent_file="/tmp/spin_percent_$BASHPID"
+spin() {
+    local -r delay='0.1'  
+    local -r spinChars='-\|/'  
+    local -r totalChars='4'  
+    local i=0
+    rm -f "/tmp/spin_percent"*
+    while sleep $delay; do
+        if [[ -f $spin_percent_file ]]; then
+            local percent=$(< $spin_percent_file)
+            printf '\r%s    [%d%%]' "${spinChars:i++%totalChars:1}" "${percent:-0}"
+        else
+            printf '%s\r' "${spinChars:i++%totalChars:1}"  
+        fi
+    done
+}
+simple_select_config() {
+    index=0
+    [ ! $1 ] && read -p "Please input product info: " keyword || keyword=$1
+    [[ ! $keyword || $keyword == "q" ]] && exit 0
+    while :
+    do
+        num=0
+        for file in `find configs/ -iname "*$keyword*" |awk -F / '{print $NF}'`
+        do
+            echo "$num> $file"
+            temp_config[num]=$file
+            num=`expr $num + 1`
+        done
+        [ ! $file ] && echo -e "\nProduct name is incorrect, please re-enter!" && simple_select_config && break
+        echo "q: exit"
+        read -p "Please select product: " select
+        [ $select = "q" ] && exit 0
+        [[ $select =~ ^[0-9]+$ ]] && {
+            config_select=${temp_config[$select]}
+        } || {
+            keyword=$select
+        }
+        [[ $config_select =~ "_defconfig" ]] && echo "config_select: "$config_select && break
+    done
+}
+reduced_product_config() {
+    for ((index=0; index<${#enum_config[@]}; index++))
+    do
+        echo "$index> ${enum_config[$index]}"
+    done
+    echo -e "q: exit"
+    read -p "Please select product or input keyword: " select
+    [[ $select = "q" || $select = "Q" ]] && exit 1
+    [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} || {
+        [[ ${enum_config[@]} =~ $select ]] && {
+            local index=0
+            local temp_product=()
+            for value in "${enum_config[@]}"; do
+                if [[ $value == *"$select"* ]]; then
+                    temp_product+=($value)
+                    ((index++))
+                fi
+            done
+            [ $index -gt 1 ] && {
+                enum_config=("${temp_product[@]}")
+                reduced_product_config
+            } || config_select=$value
+        } || simple_select_config $select
+    }
+}
+select_config() {
+    index=0
+    keyword=. 
+    while :
+    do
+        num=0
+        for file in `ls -1 configs/$config_select |grep $keyword`
+        do
+            echo "$num> $file"
+            temp_config[num]=$file
+            num=`expr $num + 1`
+        done
+        echo -e "\nx: backspace"
+        echo "q: exit"
+        read -p "Please select product or input keyword: " select
+        [ $select = "q" ] && exit 1 || [ $select = "x" ] && {
+            keyword=.
+            [ $index -gt 0 ] && config_select=${directory_history[$((index--))]}
+            continue
+        }
+        directory_history[$((++index))]=$config_select
+        [[ $select =~ ^[0-9]+$ ]] && {
+            config_select=${temp_config[$select]}
+        } || {
+            keyword=$select
+        }
+        [[ $config_select =~ "_defconfig" ]] && break
+    done
+}
+complex_product_config() {
+    [ $do_cmd = 'simul' ] && config_select='simulator'
+    select_config
+}
+product_config() {
+    [ $do_cmd = 'simul' ] && complex_product_config || {
+        [[ ${EXEC_PARAMS[@]} =~ '-s' ]] && complex_product_config || reduced_product_config
+    }
+}
+git_fallback() {
+    repo forall -c git reset --hard HEAD~$last_cmd
+    echo -e "\n\e[42mThe code rollback is complete!\e[0m\n"
+    repo forall -c git clean -df
+    repo sync
+}
+grep_branch() {
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/branch.temp
+}
+grep_active_branch() {
+    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/branch.temp
+}
+grep_not_branch() {
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/branch.temp
+}
+delete_branch() {
+    repo forall -p -c 'git branch -D '$1'' |tee .$script_name/branch.temp
+}
+switch_branch() {
+    [ -z $1 ] && echo "Please input correct arguments!" && exit -1
+    [[ ! -z $3 && $3 = "--f" ]] && {
+        repo forall -c git checkout -b $1 origin/$2
+        return
+    }
+    [[ -f dir.branch.temp ]] || {
+        [[ ! -f branch.temp ]] && echo "Make sure the target branch file exists!" && exit -1
+        grep project branch.temp > .$script_name/project.branch.temp
+        awk '{$1="";print $0}' project.branch.temp > dir.branch.temp
+    }
+    while read line
+    do
+        cd $line
+        [ -z $2 ] && {
+            git checkout $1
+        } || {
+            [[ ! -z $3 && $3 = "--d" ]] && {
+                git checkout $1 && git branch -D $2
+            } || {
+                git checkout -b $1 origin/$2
+            }
+        }
+        echo -e ": " $line "\n"
+        cd - >/dev/null
+    done < dir.branch.temp
+    [ $last_cmd = '?' ] || rm *.branch.temp
+}
+_parse_dirctory() {
+    dirconfig=`find /home ! -path '/home/skull/work/scripts/*' -iname $dir_cfg`
+    if [ $dirconfig ]; then
+        flash_dir=`grep -w flash-dir $dirconfig |awk -F : '{print $2}' |sed -e 's/^[ \t]*//g'`
+        ota_dir=`grep -w ota-dir $dirconfig |awk -F : '{print $2}' |sed -e 's/^[ \t]*//g'`
+        [ $do_cmd = "dircfg" ] && echo "flash directory: "$flash_dir && echo "ota directory: "$ota_dir
+    else
+        echo "固件存储路径配置文件不存在！"
+    fi
+}
+parse_dirctory() {
+    dirconfig="$CFG_IN_DIR/$dir_cfg"
+    [[ ${EXEC_PARAMS[@]} =~ '--find' ]] && {
+        [ -f ~/.$script_name/$dir_cfg ] && rm ~/.$script_name/$dir_cfg
+        dirconfig=`find /home -iname $dir_cfg`
+        echo "dirconfig: $dirconfig"
+    }
+    [ ! $dirconfig ] && echo "固件存储路径配置文件不存在！" && exit 0
+    flash_dir=`grep -w flash-dir $dirconfig |awk -F : '{print $2}' |sed -e 's/^[ \t]*//g'`
+    ota_dir=`grep -w ota-dir $dirconfig |awk -F : '{print $2}' |sed -e 's/^[ \t]*//g'`
+    read_dir=`grep -w read-dir $dirconfig |awk -F : '{print $2}' |sed -e 's/^[ \t]*//g'`
+    [[ $1 = "dircfg" ]] && {
+        echo "flash directory: "$flash_dir
+        echo "ota directory: "$ota_dir
+        echo "read directory: "$read_dir
+    }
+}
+copy_firmware() {
+    [[ ${EXEC_PARAMS[@]} =~ '-C' ]] || {
+        [[ ${enum_product_name[@]} =~ $last_cmd ]] || {
+            for ((index=0; index<${#enum_product_name[@]}; index++))
+            do
+                echo "$index> ${enum_product_name[$index]}"
+            done
+            echo -e "\nq: exit"
+            while :
+            do
+                read -p "Please select: " select
+                [[ $select = "q" || $select = "Q" ]] && exit 1
+                [[ $select =~ ^[0-9]+$ ]] || { echo "Enter a number"; continue; }
+                if ((0 <= select && select < ${#enum_product_name[@]})); then
+                    last_cmd=${enum_product_name[$select]}
+                    break
+                else
+                    echo "Enter a valid number"
+                fi
+            done
+        }
+    }
+    parse_dirctory
+    source_dir=`echo $source_dir`
+    [ $last_cmd = '-C' ] && last_cmd=$(cat .$script_name/bak/indicator.product)
+    parent_dir=$(basename $(pwd))
+    product_ota_dir=$ota_dir/$parent_dir
+    [[ -d $source_dir ]] && {
+        [[ ${EXEC_PARAMS[@]} =~ '--fast' ]] && {
+            [ ! -d $product_ota_dir ] && mkdir -p $product_ota_dir
+            cp $source_dir/ota/resources/Application.* $product_ota_dir/$last_cmd
+            return
+        }
+        [[ ${EXEC_PARAMS[@]} =~ '-t' ]] && {
+            [ ! -d $product_ota_dir ] && mkdir -p $product_ota_dir
+            [ -d $product_ota_dir/$last_cmd ] && sudo rm -rf $product_ota_dir/$last_cmd
+            mkdir $product_ota_dir/$last_cmd
+            echo "copying..." && progress_bar &
+            pid=$!
+            cp $source_dir/watch@*_fw_only_sign.zip $product_ota_dir/$last_cmd
+            cp $source_dir/watch@*_ota_sign.zip $product_ota_dir/$last_cmd
+            cp $source_dir/watch@*.elf $product_ota_dir/$last_cmd
+            rm $product_ota_dir/$last_cmd/watch@*.*.elf
+            cp $source_dir/watch@*.map $product_ota_dir/$last_cmd
+            cp $OTA_VERSION $product_ota_dir/$last_cmd
+            kill $pid >/dev/null 2>&1 && echo -e "\n! ""OTA: "$product_ota_dir"/"$last_cmd
+        } || {
+            [[ ! -d $flash_dir ]] && echo -e "\a\e[43m!!!Please check the flash directory.\e[0m" && return -1
+            [[ ${EXEC_PARAMS[@]} =~ '-o' ]] && {
+                echo "copying..." && progress_bar &
+                [ -d $flash_dir/$last_cmd/firmwarebin ] && {
+                    cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
+                } || {
+                    cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd
+                    mv $flash_dir/$last_cmd/watch@mimxrt595.bin $flash_dir/$last_cmd/firmware_sign.bin
+                }
+            } || {
+                [ $1 = 'all' ] && {
+                    [ ! -d $flash_dir/$last_cmd ] && echo "!!Make sure the burn directory exists" && exit -1
+                    echo "copying..." && progress_bar &
+                    pid=$!
+                    cp -rf $source_dir/ramdump $flash_dir/$last_cmd/gt3_res/system
+                    cp -rf $source_dir/extfw $flash_dir/$last_cmd/gt3_res/system
+                    cp -rf $source_dir/ota/* $flash_dir/$last_cmd/gt3_res/system
+                    [ -d $flash_dir/$last_cmd/firmwarebin ] && {
+                        cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
+                    } || {
+                        cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd
+                        mv $flash_dir/$last_cmd/watch@mimxrt595.bin $flash_dir/$last_cmd/firmware_sign.bin
+                    }
+                }
+            }
+            kill $pid >/dev/null 2>&1 && echo -e "\n! ""FLASH: "$flash_dir"/"$last_cmd
+        }
+    } || echo -e "\a\e[43m!!!Please check the out directory.\e[0m"
+}
+backup_firmware() {
+    [ ! -d .$script_name/bak ] && mkdir .$script_name/bak
+    [ -f .$script_name/bak/indicator.product ] && [ -f build/out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ] && {
+        cp build/out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip .$script_name/bak/`cat .$script_name/bak/indicator.product`
+        cp $OTA_VERSION .$script_name/bak/`cat .$script_name/bak/indicator.product`
+    }
+    for product in ${enum_product_name[@]}
+    do
+        [[ $1 =~ $product ]] && break
+    done
+    [ $product = ${enum_product_name[-1]} ] && local product=$(echo "$1" | cut -d '_' -f 2)
+    echo $product |tee .$script_name/bak/indicator.product
+    [ ! -d .$script_name/bak/$product ] && mkdir -p .$script_name/bak/$product/diff
+    echo -e "\n\e[42mBackup firmware complete!\e[0m\n" 
+}
+NONE=0
+Y_Ago=1
+MO_Ago=2
+W_Ago=3
+D_Ago=4
+H_Ago=5
+M_Ago=6
+S_Ago=7
+HM=11
+YMD=12
+YMDH=13
+YMDHM=14
+YMDHMS=15
+time_array=("NONE" "Y_Ago" "MO_Ago" "W_Ago" "D_Ago" "H_Ago" "M_Ago" "S_Ago" "HM" "YMD" "YMDH" "YMDHM" "YMDHMS")
+check_time_format() {
+    local time_string=$1
+    local years_ago='^[0-9]+y$'
+    [[ $time_string =~ $years_ago ]] && return $Y_Ago
+    local months_ago='^[0-9]+mo$'
+    [[ $time_string =~ $months_ago ]] && return $MO_Ago
+    local weeks_ago='^[0-9]+w$'
+    [[ $time_string =~ $weeks_ago ]] && return $W_Ago
+    local days_ago='^[0-9]+d$'
+    [[ $time_string =~ $days_ago ]] && return $D_Ago
+    local hours_ago='^[0-9]+h$'
+    [[ $time_string =~ $hours_ago ]] && return $H_Ago
+    local minutes_ago='^[0-9]+m$'
+    [[ $time_string =~ $minutes_ago ]] && return $M_Ago
+    local seconds_ago='^[0-9]+s$'
+    [[ $time_string =~ $seconds_ago ]] && return $S_Ago
+    local time_hm_regex='^[0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_hm_regex ]] && return $HM
+    local date_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    [[ $time_string =~ $date_regex ]] && return $YMD
+    local time_h_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}$'
+    [[ $time_string =~ $time_h_regex ]] && return $YMDH
+    local time_m_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_m_regex ]] && return $YMDHM
+    local time_s_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_s_regex ]] && return $YMDHMS
+    return $NONE
+}
+check_time=0
+time_result() {
+    local time_input=$1
+    check_time_format "$time_input"
+    local reval=$?
+    local number=$(echo "$time_input" | awk -F'[^0-9]' '{print $1}')
+    [[ $number -eq 0 ]] && reval=$NONE
+    case ${time_array[$reval]} in
+        HM)
+            check_time="`date "+%Y-%m-%d"` $time_input"
+            ;;
+        YMD|YMDH|YMDHM|YMDHMS)
+            check_time="$time_input"
+            ;;
+        Y_Ago)
+            check_time="$number year ago"
+            ;;
+        MO_Ago)
+            check_time="$number month ago"
+            ;;
+        W_Ago)
+            check_time="$number weeks ago"
+            ;;
+        D_Ago)
+            check_time="$number day ago"
+            ;;
+        H_Ago)
+            check_time="$number hour ago"
+            ;;
+        M_Ago)
+            check_time="$number minute ago"
+            ;;
+        S_Ago)
+            check_time="$number second ago"
+            ;;
+        *)
+            echo -e "\033[43mTime information input is incorrect\033[0m"
+            echo "Legal style: year-month-day, hour:minute, 1y, 1mo, 1w, 1d, 1h, 1m, 1s"
+            check_time=${time_array[$reval]}
+            ;;
+    esac
+    echo "check_time: "$check_time
+}
+dircfg() {
+    sudo echo "Hi~ $GERRIT_USER"
+    if [[ -n $1 ]]; then
+        [ $1 = '-s' ] && {
+            parse_dirctory dircfg
+            return 0
+        }
+        [ $1 = '-w' ] && {
+            local temp1
+            echo "now flash path: " $flash_dir
+            read -p "new flash path(default is keep): " temp1
+            [ ! -d $temp1 ] && {
+                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                [ $answer = 'Y' ] && mkdir $temp1
+            }
+            [ $temp1 ] && flash_dir=$temp1
+            local temp2
+            echo "now ota path: " $ota_dir
+            read -p "new ota path(default is keep): " temp2
+            [ ! -d $temp2 ] && {
+                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                [ $answer = 'Y' ] && mkdir $temp2
+            }
+            [ $temp2 ] && ota_dir=$temp2
+            local temp3
+            echo "now read path: " $read_dir
+            read -p "new read path(default is keep): " temp3
+            [ ! -d $temp3 ] && {
+                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                [ $answer = 'Y' ] && mkdir $temp3
+            }
+            [ $temp3 ] && read_dir=$temp3
+            [[ -z $temp1 && -z $temp2 && -z $temp3 ]] && echo "Keep Default!" && return 1
+            [[ ! -d $CFG_IN_DIR ]] && sudo mkdir $CFG_IN_DIR
+        }
+        [ $1 = '-p' ] && {
+            [[ -z $2 ]] && echo "I think you should tell me something!" && return 1
+            [[ ! -d $2 ]] && {
+                echo ": $2"
+                read -p "Do you want to create this directory?  [Y/N]: " choice
+                [[ "$choice" != "Y" ]] && return 1
+                sudo mkdir -p $2
+                [[ $? != 0 ]] && return -1
+            }
+            read -p "Config Directory in $cfg_path  [Y/N] " choice
+            [[ "$choice" != "Y" ]] && return 1
+            CFG_IN_DIR=$2
+        }
+    elif [[ ! -d $CFG_IN_DIR ]]; then
+        read -p "Do you want to find the CFG directory?  [Y/N]: " choice
+        [[ "$choice" != "Y" ]] && return 1
+        echo "Finding..."
+        spin &
+        pid=$!
+        cfg_path=`find /home -iname $script_name -type f`
+        kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+        read -p "Config Directory in $cfg_path  [Y/N] " choice
+        [[ "$choice" != "Y" ]] && return 1
+        CFG_IN_DIR=${cfg_path%/*}
+    else
+        read -p "Do you want to set the default configuration information?  [Y/N]: " choice
+        [[ "$choice" != "Y" ]] && return 0
+    fi
+    [ ! -f $dir_cfg ] && touch $dir_cfg
+    cat>$dir_cfg<<EOF
+@`date +"%Y-%m-%d %H:%M:%S"` by skull
+#@pc工具烧写目录
+flash-dir: $flash_dir
+#@升级固件存放目录
+ota-dir: $ota_dir
+#@阅读代码存放目录
+read-dir: $read_dir
+EOF
+    echo "============================================================="
+    cat $dir_cfg
+    sudo mv $dir_cfg $CFG_IN_DIR
+    echo "cfg save done!"
+}
+update_product_list() {
+    local input_file=".$script_name/$MAKE_MENU"
+    [ ! -f $input_file ] && return
+    local query_string="$1"
+    local max_lines=9
+    local temp_file="$(mktemp)"
+    local sorted_temp_file="$(mktemp)"
+    while IFS=' ' read -r string frequency; do
+        if [[ "$string" == "$query_string" ]]; then
+            ((frequency++)) 
+        fi
+        printf "%s %d\n" "$string" "$frequency" >> "$temp_file" 
+    done < "$input_file"
+    sort -rn -k2 "$temp_file" > "$sorted_temp_file"
+    if ! grep -q "^$query_string " "$sorted_temp_file"; then
+        head -n "$max_lines" "$sorted_temp_file" > "$temp_file"
+        printf "%s 1\n" "$query_string" >> "$temp_file"
+        mv "$temp_file" "$input_file"
+    else
+        mv "$sorted_temp_file" "$input_file"
+    fi
+}
+update_code_info() {
+    [[ ${EXEC_PARAMS[@]} =~ 'init' || ${EXEC_PARAMS[@]} =~ 'sync' ]] && {
+        echo $(date) >.$script_name/$CODE_INFO
+        [[ ${EXEC_PARAMS[@]} =~ 'init' ]] && {
+            branch="$arg2"
+            [[ -z $branch ]] && branch="master"
+            echo "branch: "$branch >>.$script_name/$CODE_INFO
+            xml="$arg3"
+            [[ -z $xml ]] && xml="huamiOS"
+            echo "xml: "$xml >>.$script_name/$CODE_INFO
+        }
+        [[ ${EXEC_PARAMS[@]} =~ 'sync' ]] && {
+            cd .repo/manifests
+            local hit_branch=0
+            branch=$(git branch -avv |grep "*")
+            [[ -n $branch ]] && {
+                local detach=$(echo $branch |grep "HEAD detached at")
+                [[ -n $detach ]] && {
+                    local detach_commit=$(echo $detach |awk -F '[()]' '{print $2}' |awk -F 'at' '{print $2}' |xargs)
+                    branch=$(git branch -r --contains $detach_commit |grep '^[[:space:]]*m/')
+                    branch=$(echo $branch |grep "\->" |awk -F '->' '{print $2}' |xargs)
+                    hit_branch=1
+                }
+                local default=$(echo $branch |grep "default")
+                [[ $hit_branch -eq 0 && -n $default ]] && {
+                    branch=$(echo $default |awk -F ' ' '{print $3}' |xargs git branch -r --contains |grep "\->" |awk -F '->' '{print $2}' |xargs)
+                    hit_branch=1
+                }
+                [[ $hit_branch -eq 0 ]] && {
+                    branch=$(echo $branch |awk -F '[\\[\\]]' '{print $2}' |xargs)
+                    hit_branch=1
+                }
+            }
+            cd - >/dev/null
+            [[ -z $branch ]] && branch="unKnown"
+            echo "branch: "$branch >>.$script_name/$CODE_INFO
+            xml=$(ls -l .repo |grep manifest.xml |cut -d '/' -f2)
+            [[ -z $xml ]] && xml="unKnown"
+            echo "xml: "$xml >>.$script_name/$CODE_INFO
+        }
+    }
+}
+OPTION_INDEX=0
+OPTION_VALUE=""
+get_option_index_ande_value() {
+    local option="$1"
+    local index=-1
+    local value=""
+    local args=("${EXEC_PARAMS[@]}")
+    for ((i = 0; i <= $arg_count; i++)); do
+        arg="${args[$i]}"
+        case $arg in
+            $option=*)
+                value="${arg#$option=}"
+                index=$i
+                ;;
+            $option)
+                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
+                    value="${args[$((i + 1))]}"
+                    index=$((i + 1))
+                    ((i++)) 
+                else
+                    echo "Error: Option $option requires a non-empty value." >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+    OPTION_INDEX=$index
+    OPTION_VALUE=$value
+    [ $last_cmd = '?' ] && echo "Index: "$OPTION_INDEX "Value: "$OPTION_VALUE
+}
+test_get_option() {
+    get_option_index_ande_value --name
+    echo "index: "$OPTION_INDEX
+    get_option_index_ande_value --value
+    echo "value: "$OPTION_VALUE
+}
+extract_option() {
+    help_file="dit.sh"
+    option="$1"
+    main_option="$2"
+    start_line=$(grep -nw "^\$script_name $option" "$help_file" |head -n 1 | cut -d: -f1 | xargs)
+    echo "start_line: "$start_line
+    main_option_start_line=$(tail -n +"$start_line" "$help_file" | grep  -nwE "^[[:space:]]{4}$main_option" |head -n 1 |cut -d: -f1 | xargs)
+    echo -e "main_option_start_line: $main_option_start_line\n"
+    line_number=$((start_line + main_option_start_line - 1))
+    echo "line_number: "$line_number
+    option=$(tail -n +"$line_number" "$help_file" | awk -v option="$option" -v main_option="$main_option" '
+        /^[ ]{4}[^[:space:]]/ {
+            if ($1 == main_option) {
+                current_option = $1
+                suboptions[current_option] = ""
+            }
+        }
+        /^\s{8}-[a-zA-Z0-9]/ || /^\s{8}--/ {
+            if (current_option != "") {
+                suboptions[current_option] = suboptions[current_option] " " $1
+            }
+        }
+        /^^[ ]{4}[^[:space:]]/ && $1 != main_option {
+            exit
+        }
+        END {
+            result = ""
+            for (option in suboptions) {
+                result = result option ": " suboptions[option] "\n"
+            }
+            print result
+        }')
+    echo "option: $option"
+}
+dollar_symbol() {
+    echo "\$# "$# 
+    echo "\$? "$? 
+    echo "\$* "$* 
+    echo "\$@ "$@ 
+    echo "\$$ "$$ 
+    echo "\$! "$! 
+    echo "\$0 "$0 
+    echo "\$n "$1 $2 $3 
+}
+test_instance() {
+    for cmd in "${command_blacklist[@]}"; do
+        echo "$cmd" "${cmd:0:1}" "${script_name}${cmd}"
+        [ "${cmd:0:1}" == '-' ] && cmd="${script_name}${cmd}"
+        sed -i "/function ${cmd}/,/^\}/d" ___dit.sh
+    done
+}
+function dit-clean {
+    mv .$script_name/$HANDLE_HISTORY .
+    mv .$script_name/$MAKE_MENU .
+    rm -rf .$script_name
+    mkdir .$script_name && mv $HANDLE_HISTORY .$script_name
+    [ $last_cmd = '--all' ] && {
+        rm -rf vmmc.bin
+        cd build && make clean
+        cd - >/dev/null
+    }
+    return 0
+}
+function dit-init {
+    branch_name=$arg2
+    xml_name=$arg3
+    [ ! $branch_name ] && branch_name=master
+    [ ! $xml_name ] && xml_name=huamiOS
+    repo init --repo-url=ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/git-repo -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
+    repo sync -j16
+    [ $? != 0 ] && return -1
+    echo -e "\n\e[42mOver!\e[0m\n"
+    return 0
+}
+function code_assign_node {
+    local _date=$(date "+%Y-%m-%d")
+    [ $1 = $last_cmd ] && {
+        echo "1. "$_date
+        read -p "input year: " _year
+        read -p "input month: " _month
+        read -p "input day: " _day
+        [[ $_year && $_month && $_day ]] && {
+            if [[ $_year -lt 100 ]]; then
+                _year="20$_year"
+            fi
+            _month=$(printf "%02d" $_month)
+            _day=$(printf "%02d" $_day)
+            _date="${_year}-${_month}-${_day}"
+            echo "2. "$_date
+        } || {
+            _date=$(date "+%Y%m%d_%H%M%S")
+            echo "3. "$_date
+            spin &
+            pid=$!
+            repo manifest -o manifest-$_date.xml -r
+            echo "\"manifest-$_date.xml\" in `pwd`"
+            kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+            return 0
+        }
+    } || {
+        time_result $last_cmd
+        [ "$check_time" = "${time_array[$NONE]}" ] && return -1
+        _date=$check_time
+        echo "4. "$_date
+    }
+    spin &
+    pid=$!
+    readarray -t git_repo_dir < <(find . -type d -name ".git" | xargs -I {} dirname {})
+    for dir in "${git_repo_dir[@]}"; do
+        cd $dir
+        commit=$(git log --date=short --pretty=format:"%ad %h" --before="$_date" | head -n 1 | cut -d " " -f2);
+        git checkout $commit >/dev/null 2>&1
+        cd - >/dev/null
+    done
+    kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+    DATE=$(date "+%Y%m%d_%H%M%S")
+    specific_date=$(date -d "$_date" "+%Y%m%d")
+    echo "5. "$DATE " "$specific_date
+    repo manifest -o manifest-${DATE}__$specific_date.xml -r
+    echo "\"manifest-$_date.xml\" in `pwd`"
+    (repo sync >/dev/null 2>&1 && echo "" && prompt_tone 0) &
+    return 0
+}
+function dit-xml {
+    option_check $arg2
+    case $arg2 in
+        -s|switch)
+            [[ ${EXEC_PARAMS[@]} =~ '--branch' ]] && {
+                get_option_index_ande_value --branch
+                manifest_branch=$OPTION_VALUE
+            }
+            [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && {
+                get_option_index_ande_value --xml
+                manifest_xml=$OPTION_VALUE
+            }
+            [ ! $manifest_xml ] && {
+                echo -e "\a!!! Please enter the product name."
+                exit 1
+            }
+            [[ $last_cmd =~ ^[0-9]+$ ]] && git_fallback
+            [[ $manifest_branch ]] && {
+                cd .repo/manifests
+                git checkout origin/$manifest_branch
+                cd - >/dev/null
+            }
+            echo "xml switching..."
+            repo init -m ${manifest_xml%.*}.xml
+            echo -e "\n\e[42m===========================================================================================\e[0m\n"
+            repo sync -c -j16
+            ;;
+        -g|generate)
+            code_assign_node $arg2
+            ;;
+        -d|diff)
+            local old=$arg3
+            local new=$arg4
+            [ ! $new ] && {
+                read -p "input old.xml: " old
+                read -p "input new.xml: " new
+            }
+            old=$(basename "$old" "${old##*.}")
+            new=$(basename "$new" "${new##*.}")
+            [ $last_cmd = '?' ] && echo "old "$old  "new "$new
+            old=${old%.*}
+            new=${new%.*}
+            cp $old.xml $new.xml .repo/manifests
+            [[ "$current_dir" != *.repo/manifests ]] && cd .repo/manifests
+            local _date=$(date "+%Y%m%d")
+            repo diffmanifests $old.xml $new.xml >master_changelog-$_date.txt
+            mv master_changelog-$_date.txt ../..
+            rm $old.xml $new.xml
+            cd ../.. >/dev/null
+            absolute_path=$(realpath "master_changelog-$_date.txt")
+            directory=$(dirname "$absolute_path")
+            echo master_changelog-$_date.txt " in " $directory
+            ;;
+        *)
+            echo -e "\n!!Please check the option parameters"
+            ;;
+    esac
+    return 0
+}
+function dit-sync {
+    option_check $arg2
+    [[ $arg2 && $arg2 = '--depth' ]] && {
+        [[ $last_cmd =~ ^[0-9]+$ ]] && git_fallback
+    } || {
+        [[ $arg2 && $arg2 = '--rebase' ]] && {
+            repo forall -c git pull --rebase
+        } || {
+            repo sync --force-sync
+        }
+    }
+    return 0
+}
+function dit-make {
+    option_check $arg2
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.8 /usr/bin/python
+    if [[ ${EXEC_PARAMS[@]} =~ '--backup' ]]; then
+        [ -d build/out/watch@*/binary/ota ] && {
+            spin &
+            pid=$!
+            [ -d ../firm-bk ] && rm -rf ../firm-bk
+            mkdir ../firm-bk
+            cp -r build/out/watch@* ../firm-bk
+            kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+        } || echo -e "\nFirmware ota diectory do not exist!"
+        return 0
+    elif [[ ${EXEC_PARAMS[@]} =~ '--restore' ]]; then
+        spin &
+        pid=$!
+        [ -d build/out/watch@* ] && rm -rf build/out/watch@*
+        [ -d ../firm-bk/watch@*/binary/ota ] && cp -r ../firm-bk/watch@* build/out || echo -e "\nFirmware ota diectory do not exist!"
+        kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+        return 0
+    fi
+    [ ! -f build/sign.pem ] && {
+        [ ! -f $sig_file ] && {
+            echo "!!Signature file does not exist"
+            echo "Please execute the command  dit cfg --signature"
+            return -1
+        }
+        cp $sig_file ./build
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--skip' ]] || {
+        if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
+            local platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}')
+            echo -e "\n**platform: "$platform
+            if [ $platform = \"mhs003\" ]; then
+                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mhs003/init/board_bsd.c
+            elif [[ $platform =~ "mimxrt595" ]]; then
+                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mimxrt595/board_bsd.c
+            fi
+        else
+            [ -f .$script_name/$MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 .$script_name/$MAKE_MENU)
+            product_config
+            update_product_list $config_select
+            backup_firmware $config_select
+            cd build
+            if [[ ! ${EXEC_PARAMS[@]} =~ '-fw' ]]; then
+                make clean
+                make distclean
+            fi
+            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
+                echo "$last_cmd" |grep [^0-9.] >/dev/null || version=$last_cmd
+            }
+            [[ ${EXEC_PARAMS[@]} =~ '-r' ]] && debug_release=release
+            [[ ${EXEC_PARAMS[@]} =~ '--version' ]] && {
+                get_option_index_ande_value --version
+                version=$OPTION_VALUE
+                echo "build version: "$version
+            }
+            deconfig=`find ../ -iname $config_select`
+            local temp=$(mktemp)
+            cp $deconfig $temp
+            sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$version'"' $deconfig
+            make $config_select BUILD_TYPE=$debug_release BUILD_FW_VER=$version
+            echo $config_select": "$version >../$OTA_VERSION
+        fi
+        [[ `pwd` =~ 'build' ]] || cd build
+        head -n 1 ../$OTA_VERSION > temp_$OTA_VERSION
+        truncate -s 0 ../$OTA_VERSION
+        mv temp_$OTA_VERSION ../$OTA_VERSION
+        echo "delta version: "$version >>../$OTA_VERSION
+        echo "build info: "$debug_release" by "$GERRIT_USER" @"$(date) >>../$OTA_VERSION
+        [[ ${EXEC_PARAMS[@]} =~ '-a' ]] && {
+            echo "config_select: "$config_select
+            [[ $config_select =~ "mhs003" ]] && {
+                echo "other core: build mhs003" >>../$OTA_VERSION
+                [ -d out_hub ] && rm out_hub -rf
+                make mhs003_matterhorn_sensorhub_defconfig APPDIR=out_hub
+                make BUILD_DIR=out_hub APPDIR=out_hub
+                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003.bin ../platform/board/mhs003/products/matterhorn/sensorhub
+            }
+        }
+        if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
+            make ota -j16
+        else
+            make -j16
+        fi
+        [ $? != 0 ] && echo "make terminal" && return -1
+        if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
+            if [ $platform = \"mhs003\" ]; then
+                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mhs003/init/board_bsd.c
+            elif [ $platform = \"mimxrt595\" ]; then
+                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mimxrt595/board_bsd.c
+            fi
+        else
+            mv $temp $deconfig
+        fi
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '-t' ]] && {
+        [[ `pwd` =~ 'build' ]] || cd build
+        [ ! -f ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
+            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ../.$script_name/bak/$product/diff/watch@mimxrt595_ota_sign.zip
+        }
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '-fw' ]] && {
+        [[ `pwd` =~ 'build' ]] || cd build
+        cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
+        sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
+        python scripts/ota_gen_zip.py
+        mv scripts/temp_ota_gen_zip.py scripts/ota_gen_zip.py
+    }
+    rm -rf sign.pem
+    cd - >/dev/null
+    return 0
+}
+function dit-simul {
+    option_check $arg2
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.8 /usr/bin/python
+    if [[ ${EXEC_PARAMS[@]} =~ '--enter' ]]; then
+        echo "please input: auth 1, userdata 1"
+        ./simulator/tool/shell_client
+    elif [[ ${EXEC_PARAMS[@]} =~ '--gapp' ]]; then
+        [ -f /mnt/vmmc/system/resources/Application.bin ] && sudo rm /mnt/vmmc/system/resources/Application.bin
+        sudo sudo cp ui/prototype/Application/monaco/Application.gapp /mnt/vmmc/system/resources/
+    elif [[ ${EXEC_PARAMS[@]} =~ '--mount' ]]; then
+        simulator/tool/update_vmmc_simx86.sh ota vmmc.bin mount
+    elif [[ ${EXEC_PARAMS[@]} =~ '--remount' ]]; then
+        ./build/out/sim_app@simx86/binary/sim_app@simx86.elf -pimage,./vmmc.bin /mnt/system/resources/Application.gapp
+        simulator/tool/update_vmmc_simx86.sh build/out/sim_app@simx86/binary/ota vmmc.bin
+        simulator/tool/update_vmmc_simx86.sh ota vmmc.bin mount
+    elif [[ ${EXEC_PARAMS[@]} =~ '--umount' ]]; then
+        simulator/tool/update_vmmc_simx86.sh ota vmmc.bin umount
+    elif [[ ${EXEC_PARAMS[@]} =~ '--backup' ]]; then
+        [ ! -d build/out/sim_app@simx86/binary/ota ] && {
+            echo -e "\nSimulator ota diectory do not exist!"
+            return 1
+        }
+        spin & 
+        pid=$! 
+        [ -d ../simul-bk ] && rm -rf ../simul-bk
+        mkdir ../simul-bk
+        cp -r build/out/sim_app@simx86 ../simul-bk
+        kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+    elif [[ ${EXEC_PARAMS[@]} =~ '--restore' ]]; then
+        [ -d ../simul-bk/sim_app@simx86/binary/ota ] && {
+            echo -e "\nSimulator ota diectory do not exist!"
+            return 1
+        }
+        spin &
+        pid=$!
+        [ -d build/out/sim_app@simx86 ] && rm -rf build/out/sim_app@simx86
+        cp -r ../simul-bk/sim_app@simx86 build/out
+        kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+    elif [[ ${EXEC_PARAMS[@]} =~ 'make' ]]; then
+        [ ! -f build/sign.pem ] && cp $sig_file ./build
+        if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
+            cd build
+            make JOBS=16
+            [ $? != 0 ] && return -1
+        else
+            product_config
+            cd build
+            if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
+                make clean
+                make distclean
+                make $config_select
+                make ota #JOBS=16
+                [ $? != 0 ] && return -1
+                cd - >/dev/null
+                [ -f vmmc.bin ] && rm vmmc.bin
+                ./build/out/sim_app@simx86/binary/sim_app@simx86.elf -pimage,./vmmc.bin /mnt/system/resources/Application.gapp
+                simulator/tool/update_vmmc_simx86.sh build/out/sim_app@simx86/binary/ota vmmc.bin
+                simulator/tool/update_vmmc_simx86.sh ota vmmc.bin mount
+                cd - >/dev/null
+            else
+                make $config_select
+                make JOBS=16
+                [ $? != 0 ] && return -1
+            fi
+        fi
+        rm -rf ./build/sign.pem
+        echo "build info: "$GERRIT_USER" @"$(date) >../$OTA_VERSION
+    else
+        echo "!!Please input option argument" && return 1
+    fi
+    return 0
+}
+function dit-gapp {
+    option_check $arg3
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.8 /usr/bin/python
+    product_config
+    keyword=.
+    [[ ${EXEC_PARAMS[@]} =~ '-c' ]] && {
+        while :
+        do
+            echo -e "\n\e[32mPlease select the module name listed below:\e[0m"
+            ls ui/ |grep -i $keyword |pr -3 -t
+            read -p "select module: " module
+            ls ui/ |grep -w $module && break || keyword=$module
+        done
+    }
+    [[ $last_cmd == '-c' || $last_cmd == '-s' ]] || {
+        storyboard_module=$last_cmd
+        ls ui/ |grep -w "$storyboard_module" || unset storyboard_module
+    }
+    cd build
+    make $config_select BUILD_TYPE=$debug_release
+    [ ! $module ] && {
+        [ ! $storyboard_module ] && {
+            make -j16 prototype M=common
+        } || {
+            make -j16 prototype M=$storyboard_module
+        }
+    } || make -j16 prototype M=$module
+}
+function dit-copy {
+    option_check $arg2
+    copy_firmware all
+    return 0
+}
+split_line="%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+function apply_patch {
+    REPO_PATCH="repo.patch"
+    [[ ${EXEC_PARAMS[@]} =~ '--repo-diff' ]] && {
+        get_option_index_ande_value --repo-diff
+        [[ -f $OPTION_VALUE/.$script_name/$REPO_DIFF ]] && cp $OPTION_VALUE/.$script_name/$REPO_DIFF .$script_name/$REPO_PATCH
+    }
+    [[ ! -f .$script_name/$REPO_PATCH && ! -f .$script_name/$REPO_DIFF ]] && echo -e "\n!!Please exec diff command" && return 1
+    grep -n $split_line .$script_name/$REPO_PATCH | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_PATCH >.$script_name/patch_project.temp
+    grep -w "^project" .$script_name/patch_project.temp >.$script_name/patch_path_project.temp
+    [ ! -s .$script_name/patch_path_project.temp ] && echo "** Nothing To Patch" && rm .$script_name/patch*.temp && return 0
+    patch_code_path=`awk -F " " '{print $2}' .$script_name/patch_path_project.temp`
+    [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "patch_code_path $patch_code_path"
+    grep -n $split_line .$script_name/$REPO_PATCH |awk -F ":" '{print $1}' |xargs -I{} sed -n '{},$p' .$script_name/$REPO_PATCH >.$script_name/patch_content.temp
+    [ ! -s .$script_name/patch_content.temp ] && echo "** Nothing To Patch Content" && rm .$script_name/patch*.temp && return 0
+    patch_content_number=$(grep -nw "^project" .$script_name/patch_content.temp |cut -d ':' -f1)
+    readarray -t patch_content_number <<<$patch_content_number
+    [[ $last_cmd = '@' ]] && {
+        [[ -d .$script_name/patch ]] && rm -rf .$script_name/patch
+        mkdir .$script_name/patch
+    }
+    readarray -t patch_code_path <<<$patch_code_path
+    for ((index=0; index<${#patch_code_path[@]}; index++))
+    do
+        start_number=$(( ${patch_content_number[$index]} +1 ))
+        [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "* start_number $start_number"
+        if [[ $index -lt $(( ${#patch_code_path[@]} - 1 )) ]]; then
+            end_number=$(( ${patch_content_number[$((index + 1))]} -1 ))
+            [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "* end_number $end_number"
+            sed -n "${start_number},${end_number}p" .$script_name/patch_content.temp >.$script_name/temp.patch
+            [[ $last_cmd = '@' ]] && sed -n "${start_number},${end_number}p" .$script_name/patch_content.temp >.$script_name/patch/$index.patch
+        else
+            sed -n "${start_number},\$p" .$script_name/patch_content.temp >.$script_name/temp.patch
+            [[ $last_cmd = '@' ]] && sed -n "${start_number},\$p" .$script_name/patch_content.temp >.$script_name/patch/$index.patch
+        fi
+        cd ${patch_code_path[$index]}
+        [[ $last_cmd = '@' ]] && git apply --check $current_path/.$script_name/patch/$index.patch
+        git apply --3way $current_path/.$script_name/temp.patch
+        cd - >/dev/null
+    done
+    [[ $last_cmd = '@' ]] && {
+        rm -rf .$script_name/patch
+    }
+    rm .$script_name/temp.patch
+    rm .$script_name/patch*.temp
+    return 0
+}
+function dit-diff {
+    option_check $arg2
+    [[ $last_cmd = '--backup' ]] && cp .$script_name/$REPO_DIFF .$script_name/repo_bk.diff && return 0
+    [[ $arg2 = '-p' ]] && {
+        apply_patch
+        return $?
+    }
+    echo "diff..."
+    spin &
+    pid=$!
+    echo "$"$do_cmd" "$arg2"  @"$(date) >.$script_name/$REPO_DIFF
+    type_filter='*.c *.cc *.cpp *.h'
+    type_filter_group=('*.c' '*.cc' '*.cpp' '*.h')
+    file_exclude=('generated_sku.h')
+    file_exclude_diff=(':!*generated_sku.h')
+    [[ ${EXEC_PARAMS[@]} =~ '--path' ]] && {
+        arg_position=0
+        for arg in "$@"
+        do
+            arg_position=$((arg_position+1))
+            if [ "$arg" = "--path" ]
+            then
+                arg_position=$((arg_position+1))
+                break
+            fi
+        done
+        for arg in "${@:$arg_position}"
+        do
+            if [[ $arg == +* ]]
+            then
+                file_type=${arg:1}
+                path_keyword+=" -e $file_type"
+            else
+                break
+            fi
+        done
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--suffix' ]] && {
+        arg_position=0
+        for arg in "$@"
+        do
+            arg_position=$((arg_position+1))
+            if [ "$arg" = "--suffix" ]
+            then
+                arg_position=$((arg_position+1))
+                break
+            fi
+        done
+        for arg in "${@:$arg_position}"
+        do
+            if [[ $arg == +* ]]
+            then
+                file_type=${arg:1}
+                type_special+=" *.$file_type"
+                type_filter+=" *.$file_type"
+                type_filter_group+=("*.$file_type")
+            else
+                break
+            fi
+        done
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--exclude' ]] && {
+        arg_position=0
+        for arg in "$@"
+        do
+            arg_position=$((arg_position+1))
+            if [ "$arg" = "--exclude" ]
+            then
+                arg_position=$((arg_position+1))
+                break
+            fi
+        done
+        for arg in "${@:$arg_position}"
+        do
+            if [[ $arg =~ ^-[^-].* ]]
+            then
+                file_type=${arg:1}
+                file_exclude+=" -e $file_type"
+                file_exclude_diff+=(" :!*$file_type")
+            else
+                break
+            fi
+        done
+    }
+    [[ ! $path_keyword ]] && path_keyword=.
+    [ $arg2 ] && {
+        [ $arg2 = '-i' ] && {
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a .$script_name/$REPO_DIFF
+            echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>.$script_name/$REPO_DIFF
+            unset file_exclude
+        } || {
+            [ $arg2 = '-a' ] && {
+                [[ $arg3 = '-v' ]] && {
+                    repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git status --porcelain; git diff; fi'
+                } || {
+                    repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
+                    echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+                }
+                unset file_exclude
+            } || {
+                [ $arg2 = '-c' ] && {
+                    [[ ${EXEC_PARAMS[@]} =~ '--file' ]] && {
+                        for arg in "$@"
+                        do
+                            if [[ $arg == +* ]]
+                            then
+                                file_name=${arg:1}
+                                type_special+=" -e $file_name"
+                            fi
+                        done
+                        echo $type_special
+                        repo forall -p -c 'if git status --porcelain |grep -i '"$type_special"' >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
+                    } || {
+                        type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
+                        repo forall -p -c 'if git status --porcelain |grep -E "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
+                    }
+                    echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+                    unset file_exclude
+                } || {
+                    [ $arg2 = '-x' ] && {
+                        [ -z $type_special ] && type_special=".gapp"
+                        repo forall -p -c 'if git status --porcelain |grep -Ev "\.('"$type_special"')$" >/dev/null; then git status; fi' |tee -a .$script_name/$REPO_DIFF
+                        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+                        unset file_exclude
+                    }
+                }
+            }
+        }
+    }
+    [ ${#file_exclude[@]} -ne 0 ] && {
+        [[ ${EXEC_PARAMS[@]} =~ '--path' ]] && {
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a .$script_name/$REPO_DIFF
+            echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>.$script_name/$REPO_DIFF
+            kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+            return 0
+        }
+        echo " exclude file: "$file_exclude
+        repo forall -p -c 'git diff --stat '"${type_filter_group[*]}"' '"${file_exclude_diff[*]}"'' |tee -a .$script_name/$REPO_DIFF
+        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        [ $last_cmd = '?' ] && echo -e "\n> git diff -- "${type_filter_group[*]} ${file_exclude_diff[*]}
+        [[ $arg2 = '-v' ]] && {
+            repo forall -p -c 'git diff -- '"${type_filter_group[*]}"' '"${file_exclude_diff[*]}"'' |tee -a .$script_name/$REPO_DIFF
+        } || {
+            repo forall -p -c 'git diff -- '"${type_filter_group[*]}"' '"${file_exclude_diff[*]}"'' >>.$script_name/$REPO_DIFF
+        }
+    }
+    kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+    return 0
+}
+function dit-commit {
+    option_check $arg2
+    [[ $arg2 = '-m' && ! $arg3 ]] && echo -e "\e[43m\e[31m!!Please input commit branch\e[0m" && return -1
+    backup_branch=$arg3
+    [ ! -f .$script_name/$REPO_DIFF ] && echo -e "\n!!Please exec diff command" && return 1
+    grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF >.$script_name/commit_project.temp
+    grep -w "^project" .$script_name/commit_project.temp >.$script_name/commit_path_project.temp
+    [ ! -s .$script_name/commit_path_project.temp ] && echo "** Nothing To Submit" && rm .$script_name/commit*.temp && return 0
+    commit_code_path=`awk -F " " '{print $2}' .$script_name/commit_path_project.temp`
+    [[ $last_cmd = '?' ]] || rm .$script_name/commit*.temp
+    local temp_commit_log="$current_path/.$script_name/temp_commit.log"
+    touch $temp_commit_log
+    readarray -t commit_code_path <<<$commit_code_path
+    [[ $last_cmd = '?' ]] && echo "commit_code_path  ${commit_code_path[@]}"
+    local message=$arg4
+    local topic=$arg5
+    local reentry="no"
+prompt="
+----------------------------------------------------------------------------------------------
+ (Y)confirm commit    (M)mount commit    (N)skip commit    (C)amend commit    (B)change branch
+ (A)add file          (R)exclude file    (V)view diff      (I)info check      (L)view log
+ (Q)exit"
+    for ((index=0; index<${#commit_code_path[@]}; index++))
+    do
+        echo -e "\npath: "${commit_code_path[$index]}
+        cd ${commit_code_path[$index]}
+        [[ $arg2 = '--log' ]] && {
+            [ $last_cmd = $arg2 ] && last_cmd=1
+            git log --oneline -$last_cmd
+            cd - >/dev/null
+            continue
+        }
+        git status
+        git add -u
+        git status
+        branch=$arg3
+        while true
+        do
+            [ ! $input ] && read -p "$(printf "%s $prompt \n\nYou Choice: ")" input
+            case $input in
+                Y|M)
+                    [ ! $branch ] && bt=$input && input=I && continue
+                    local result=$(git branch -a| grep "remotes/origin/$branch")
+                    [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
+                    [[ ! $message ]] && {
+                        while :
+                        do
+                            read -p "> commit message: " temp_message
+                            [ ! "$temp_message" ] && continue || {
+                                message=$temp_message
+                                break
+                            }
+                        done
+                    }
+                    git commit -m "$message"
+                    [ $input = 'M' ] && git commit --amend
+                    git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
+                    echo -e "\r\n" >> $temp_commit_log
+                    break
+                    ;;
+                N)
+                    echo -e "\e[43m\e[31m!!Skip this commit...\e[0m"
+                    git reset
+                    break
+                    ;;
+                C)
+                    [ $reentry == "yes" ] && {
+                        read -p "> commit branch: " temp_branch
+                        [ ! $temp_branch ] && git reset && break
+                    } || {
+                        local commit_id=$(git log -1 |grep commit |awk -F " " '{print $2}')
+                        temp_branch=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$commit_id |grep "branch:" |awk -F " " '{print $2}')
+                        echo "amend branch: "$temp_branch
+                        [ ! $temp_branch ] && {
+                            local change_id=$(git log -1 |grep Change-Id |awk -F " " '{print $2}')
+                            readarray -t branches < <(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
+                            local number=0
+                            for branch in "${branches[@]}"; do
+                                echo "$number>: $branch"
+                                ((number++))
+                            done
+                            read -p "Please select branch: " select
+                            [[ $select =~ ^[0-9]+$ ]] && temp_branch=${branches[$select]}
+                        }
+                    }
+                    reentry="yes"
+                    [ -z "$temp_branch" ] && echo "! Branch Not Found" && continue
+                    local result=$(git branch -a| grep "remotes/origin/$temp_branch")
+                    [ -z "$result" ] && echo "! Branch Not Exist" && continue
+                    reentry="no"
+                    branch=$temp_branch
+                    git commit --amend --no-edit
+                    git push origin HEAD:refs/for/$branch 2>&1 |tee -a $temp_commit_log
+                    echo -e "\r\n" >> $temp_commit_log
+                    break
+                    ;;
+                B)
+                    echo "> remote branch:"
+                    git branch |grep detached && git branch -a |grep "\->" || git branch -vv
+                    git branch -a |grep "\->"
+                    read -p " new branch: " branch
+                    input=$bt && continue
+                    ;;
+                A)
+                    read -p " add untracked file: " untracked_file
+                    git add $untracked_file
+                    git status
+                    ;;
+                R)
+                    read -p " restore file: " restore_file
+                    git reset $restore_file
+                    git status
+                    ;;
+                V)
+                    git diff --cached
+                    ;;
+                I)
+                    local depth=0
+                    local branch_num=0
+                    local single_branch=$(git show -s --decorate |grep "^commit" |grep "\->")
+                    [[ -n "single_branch" ]] && branch_num=2 depth=1
+                    while (( branch_num < 2 )); do
+                        branch_num=$(git show -s --decorate HEAD~$depth |grep "^commit" |cut -d \( -f2 |awk -F ',' '{printf $0}' |wc -w)
+                        (( depth++ ))
+                    done
+                    (( depth-- ))
+                    local branch_tips=$(git show -s --decorate HEAD~$depth |grep "^commit" |cut -d \( -f2 |xargs)
+                    branch_tips=${branch_tips%)}
+                    [ -n "$branch_tips" ] && echo "Maybe it helps: $branch_tips"
+                    echo " * Branch:   "$branch
+                    echo " * Message:  "$message
+                    echo " * Topic:    "$topic
+                    echo "(If no modification is needed, press 'Enter'. To go back, input 'Q'.)"
+                    read -p "> commit branch: " temp_branch
+                    [[ $temp_branch == 'Q' || ( -z $temp_branch && -z $branch ) ]] && {
+                        unset input
+                        continue
+                    }
+                    [[ -n $temp_branch ]] && branch=$temp_branch
+                    echo -e "\n(Please enter your commit message. Press Ctrl+D when finished.)\n> commit message: "
+                    temp_message=$(cat)
+                    [ "$temp_message" ] && message=$temp_message
+                    echo -e "\n"
+                    read -p "> commit topic: " temp_topic
+                    [ $temp_topic ] && topic=$temp_topic
+                    input=$bt && continue
+                    ;;
+                L)
+                    local depth=1
+                    while :
+                    do
+                        read -p "> log depth: " depth
+                        [[ $depth =~ ^[0-9]+$ ]] || { echo "!!Only accept digital"; continue; }
+                        break
+                    done
+                    git log -$depth
+                    ;;
+                Q)
+                    git reset
+                    break 2 
+                    ;;
+                *)
+                    echo -e "\e[47m\e[31m!!Please check the input\e[0m"
+                    ;;
+            esac
+            unset input
+            unset bt
+        done
+        unset input
+        unset bt
+        arg3=$branch
+        cd - >/dev/null
+    done
+    local size_commit_log=$(stat -c %s $temp_commit_log)
+    [ $size_commit_log -gt 0 ] && {
+        {
+            echo -e "\r\n\r\n"$(date)
+            echo -e $split_line"\r\n"
+            cat $temp_commit_log
+            [ -f $current_path/.$script_name/$COMMIT_LOG ] && cat $current_path/.$script_name/$COMMIT_LOG
+        } > temp
+        mv temp $current_path/.$script_name/$COMMIT_LOG
+    }
+    rm $temp_commit_log
+    return 0
+}
+function dit-stash {
+    option_check $arg2 must
+    [ $arg2 = "$last_cmd" ] && last_cmd=.
+    echo $(date)" : \$$_EXEC_PARAMS" >.$script_name/$REPO_STASH
+    [[ $arg2 = '-a' || $arg2 = '-ad' ]] && {
+        anser='Y'
+        repo forall -p -c "git stash list |grep "$last_cmd""
+        echo -e "\n"
+        read -p "\$ Confirm stash apply above Y/N: " anser
+        echo -e "\n\n"$split_line >>.$script_name/$REPO_STASH
+        [[ $anser && $anser = 'Y' ]] && {
+            repo forall -p -c "git stash list |grep "$last_cmd" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a .$script_name/$REPO_STASH
+        }
+    }
+    [[ $arg2 = '-d' || $arg2 = '-ad' ]] && {
+        repo forall -p -c "git stash list |grep "$last_cmd""
+        echo -e "\n"
+        read -p "\$ Confirm stash drop all Y/N: " anser
+        [[ $anser && $anser = 'Y' ]] && {
+            repo forall -p -c "git stash list |grep "$last_cmd" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a .$script_name/$REPO_STASH
+        }
+    }
+    [ $arg2 = '-v' ] && {
+        repo forall -p -c "git stash list |grep "$last_cmd"" |tee -a .$script_name/$REPO_STASH
+    }
+    [ $arg2 = '-vv' ] && {
+        repo forall -p -c "{
+            index=\$(git stash list |grep "$last_cmd" |cut -d ':' -f1)
+            [ \$index ] && echo ":"\$index && git stash show \$index
+        }" |tee -a .$script_name/$REPO_STASH
+    }
+    [ $arg2 = '-av' ] && {
+        repo forall -p -c "{
+            index=\$(git stash list |grep "$last_cmd" |cut -d ':' -f1)
+            [ \$index ] && echo ":"\$index && git show \$index
+        }" >>.$script_name/$REPO_STASH_DIFF
+    }
+    [ $arg2 = '-m' ] && {
+        grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.temp
+        read -p "\$ Confirm stash above all Y/N: " anser
+        [[ ! $anser || ($anser != 'N' && $anser != 'Y') ]] && echo "!!Invalid input" && return 1
+        [ $anser = 'Y' ] && ansersub='Y'
+        [ "$last_cmd" = '.' ] && {
+            while :
+            do
+                read -p "\$ Please input stash annotation: " last_cmd
+                [ -n "$last_cmd" ] && break
+            done
+        }
+        grep -w "^project" .$script_name/stash_project.temp >.$script_name/stash_path_project.temp
+        stash_code_path=`awk -F " " '{print $2}' .$script_name/stash_path_project.temp`
+        readarray -t stash_code_path <<<$stash_code_path
+        for path in ${stash_code_path[@]}
+        do
+            cd $path
+            [ $anser = 'N' ] && git status && read -p "\$ Confirm stash this Y/N: " ansersub
+            [ $ansersub = 'Y' ] && git stash push -m "$last_cmd" |tee -a $current_path/.$script_name/$REPO_STASH
+            cd - >/dev/null
+        done
+        rm .$script_name/stash*.temp
+        echo "Stash Complete!"
+    }
+    return 0
+}
+function dit-query {
+    option_check $arg2
+    [[ $arg2 && $arg2 = '-p' ]] && {
+        path_keyword=sport
+        [[ $last_cmd != '-p' ]] && {
+            if [ $last_cmd = 'all' ]; then
+                unset path_keyword
+            else
+                path_keyword=$last_cmd
+            fi
+        }
+        [ ! -f .$script_name/$QUERY_LOG ] && touch .$script_name/$QUERY_LOG
+        [[ ${EXEC_PARAMS[@]} =~ '--keep' ]] || {
+            [ -f .$script_name/$QUERY_LOG ] && rm .$script_name/$QUERY_LOG
+            touch .$script_name/$QUERY_LOG
+        }
+        keyword=commit 
+        spin &
+        pid=$!
+        base_dir=`pwd`
+        repo forall -p -c "{
+            short_dir=\$(realpath --relative-to=\"$base_dir\" \"\$PWD\")
+            if echo \$short_dir |grep -i '"$path_keyword"' >/dev/null; then
+                commitid=\$(git log -1 |grep commit |awk '{print \$2}')
+                changeid=\$(git log -1 |grep Change-Id: |awk '{print \$2}')
+                push_status=\$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set \$keyword \$commitid |grep rowCount: |awk '{print \$2}')
+                [ \$push_status = 0 ] && [ \$changeid ] && echo \"** No Push: \"\$changeid && git show \$commitid --stat
+            fi
+        }" |tee -a .$script_name/$QUERY_LOG
+        kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+        [[ ${EXEC_PARAMS[@]} =~ '--push' ]] || return 0
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--push' ]] && {
+        [ ! -f .$script_name/$QUERY_LOG ] && echo "!! I think you haven't executed the command \"$script_name query -p\" yet." && return -1
+        readarray -t repo_path < <(cat .$script_name/$QUERY_LOG | grep -w "^project" | awk -F " " '{print $2}')
+        readarray -t commit_id < <(cat .$script_name/$QUERY_LOG | grep -w "^commit" | awk -F " " '{print $2}')
+        [[ ${#repo_path[@]} != ${#commit_id[@]} ]] && {
+            echo -e "\033[43;37m !!The keyword 'project' does not match the number of 'commits' \033[0m"
+            return -1
+        }
+        local branch=master
+        for ((index=0; index<${#repo_path[@]}; index++))
+        do
+            echo -e "\n"
+            cd ${repo_path[$index]}
+            git show ${commit_id[$index]} --stat
+            unset enter
+            read -p "$(echo -e '\nConfirm the submit on <$branch>: Y/N?\nor modify submit branch: M?')  " enter
+            [[ $enter = 'Q' || $enter = 'q' ]] && exit 0
+            [[ $enter = 'M' ]] && {
+                read -p "new branch name: " bn_enter
+                branch=$bn_enter
+                enter=Y
+            }
+            [[ $enter = 'Y' ]] && {
+                git push origin ${commit_id[$index]}:refs/for/$branch
+            }
+            cd - >/dev/null
+        done
+        return 0
+    }
+    [[ $arg2 =~ '-s' ]] && {
+        [ $arg4 ] && {
+            cd $arg4
+            git log -p -G "$arg3" --name-only |tee $current_path/.$script_name/query_result.txt
+        } || {
+            repo forall -p -c git log -p -G "$arg3" --name-only |tee $current_path/.$script_name/query_result.txt
+        }
+        readarray -t commits < <(cat $current_path/.$script_name/query_result.txt |grep -w "^commit" |awk -F " " '{print $2}')
+        for ((index=0; index<${#commits[@]}; index++))
+        do
+            readarray -t linenum < <(cat $current_path/.$script_name/query_result.txt |grep -n "^commit" |awk -F ":" '{print $1}')
+            git show ${commits[$index]} |grep "$arg3" >$current_path/.$script_name/hit_string
+            [ $last_cmd = '?' ] && cat $current_path/.$script_name/hit_string
+            if [ $index -eq $((${#commits[@]} - 1)) ]; then
+                cat $current_path/.$script_name/hit_string >>$current_path/.$script_name/query_result.txt
+            else
+                local line_number=$((${linenum[$index+1]} - 2))
+                sed -i "${line_number}r $current_path/.$script_name/hit_string" $current_path/.$script_name/query_result.txt
+            fi
+        done
+        rm $current_path/.$script_name/hit_string
+        return 0
+    }
+    depth=7
+    if [ $# -gt 2 ]; then
+        [[ $arg2 =~ '-u' ]] && {
+            [ ! -z $arg4 ] && depth=$arg4
+            repo forall -p -c git log --author="$arg3" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+        }
+        [[ $arg2 =~ '-m' ]] && {
+            [ -z $arg3 ] && echo "Please enter the character you want to query!" && exit -1
+            echo $last_cmd |grep [0-9] >/dev/null && depth=$last_cmd
+            repo forall -p -c "git log -$depth --oneline |grep $last_cmd" |tee .$script_name/$REPO_LOG
+        }
+    else
+        [ ! -z $arg2 ] && depth=$arg2
+        repo forall -p -c git log --committer="$GERRIT_USER" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+    fi
+    return 0
+}
+function dit-tiny {
+    option_check $arg2
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.8 /usr/bin/python
+    [ ! -f build/sign.pem ] && cp $sig_file ./build
+    [[ $arg2 && $arg2 = '-p' ]] && {
+        product=$arg3
+    } || {
+        [ -f .$script_name/bak/indicator.product ] && {
+            product=`cat .$script_name/bak/indicator.product`
+            echo "product: "$product
+            [ ! -f .$script_name/bak/$product/watch@*_ota_sign.zip ] && {
+                echo -e "\a\e[1;31merror: 没有可供生成差分包的目标文件！"
+                return -1
+            }
+        }
+    }
+    [ -f build/out/watch@*/binary/watch@*_ota_sign.zip ] || {
+        echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！！"
+        return -1
+    }
+    [ ! -d $current_path/.$script_name/bak/$product/diff ] && mkdir $current_path/.$script_name/bak/$product/diff
+    cd build
+    local target=(../.$script_name/bak/$product/watch@*_ota_sign.zip)
+    local source=$(echo out/watch@*/binary/watch@*_ota_sign.zip)
+    local tiny=($current_path/.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip)
+    echo "target: $target"
+    echo "source: $source"
+    echo "tiny: $tiny"
+    python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip $current_path/.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip
+    cd - >/dev/null
+    [ $last_cmd = '-t' ] && copy_firmware
+    [[ -d $ota_dir/$product/diff ]] && rm -rf $ota_dir/$product/diff
+    mkdir -p $ota_dir/$product/diff
+    cp $current_path/.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip $ota_dir/$product/diff
+    echo $(date) && return 0
+    return 0
+}
+function dit-branch {
+    option_check $arg2
+    branch_name=$last_cmd
+    [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
+        grep_branch $branch_name
+    } || {
+        [[ ${EXEC_PARAMS[@]} =~ '-n' ]] && {
+            grep_not_branch $branch_name
+        } || {
+            [[ ${EXEC_PARAMS[@]} =~ '-x' ]] && {
+                grep_active_branch $branch_name
+            } || {
+                [[ ${EXEC_PARAMS[@]} =~ '-d' ]] && {
+                    delete_branch $branch_name
+                } || {
+                    [[ ${EXEC_PARAMS[@]} =~ '-s' ]] && {
+                        switch_branch $arg3 $arg4 $arg5
+                    }
+                }
+            }
+        }
+    }
+    return 0
+}
+function dit-cp {
+    option_check $arg2 must
+    [ $arg2 = '--check' ] && {
+        [[ ${EXEC_PARAMS[@]} =~ 'time' ]] && {
+            get_option_index_ande_value time
+            input_time=$OPTION_VALUE
+        } || {
+            [ $arg2 != $last_cmd ] && {
+                input_time=$last_cmd
+            }
+        }
+        [[ -n $input_time ]] && time_result $input_time
+        [[ "$check_time" = "${time_array[$NONE]}" || "$check_time" == "$NONE" ]] && {
+            [[ $arg3 && $arg3 = 'verbose' ]] && {
+                repo forall -p -c "git log --walk-reflogs --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+            } || {
+                repo forall -p -c 'git reflog |grep cherry-pick' |tee .$script_name/$CP_CHECK
+            }
+        } || {
+            [[ ${EXEC_PARAMS[@]} =~ 'verbose' ]] && {
+                repo forall -p -c "git log --walk-reflogs --since='$check_time' --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+            } || {
+                repo forall -p -c "git reflog --since='$check_time' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+            }
+        }
+        [[ ${EXEC_PARAMS[@]} =~ 'verbose' ]] && {
+            path_array=()
+            hash_array=()
+            while IFS= read -r line; do
+                if [[ $line =~ ^project\ (.*) ]]; then
+                    path="${BASH_REMATCH[1]}" 
+                    while true; do
+                        read -r next_line 
+                        if [[ ! $next_line ]]; then
+                            break
+                        fi
+                        path_array+=($path)
+                        hash_array+=($(echo $next_line | awk '{print $1}')) 
+                    done
+                fi
+            done <.$script_name/$CP_CHECK
+            echo -e "\n\n"$split_line >>.$script_name/$CP_CHECK
+            for ((i=0; i<${#path_array[@]}; i++)); do
+                echo ${path_array[i]}
+                echo ${hash_array[i]} 
+                cd ${path_array[i]}
+                echo -e "\nproject: "${path_array[i]} >>$current_path/.$script_name/$CP_CHECK
+                git show ${hash_array[i]} >>$current_path/.$script_name/$CP_CHECK
+                cd - >/dev/null
+            done
+        }
+        [[ ${EXEC_PARAMS[@]} =~ 'push' ]] && {
+            cat .$script_name/$CP_CHECK >.$script_name/$REPO_DIFF
+            echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        }
+        return 0
+    }
+    [ $arg2 = "--fail" ] && {
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' |tee .$script_name/$CP_FAIL
+        return 0
+    }
+    [ $arg2 = "--merge" ] && {
+        [ ! -f .$script_name/$CP_FAIL ] && echo "! Please execute the --fail option first" && return 1
+        readarray -t projects < <(grep "^project" .$script_name/$CP_FAIL |cut -d ' ' -f2)
+        for project in "${projects[@]}"; do
+            cd $project
+            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && git diff
+            git add -u
+            git cherry-pick --continue
+            local commit_id=$(git log -1 |grep commit |awk -F " " '{print $2}')
+            local branch=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$commit_id |grep "branch:" |awk -F " " '{print $2}')
+            read -p "Confirm commit branch: $branch  [Y/N/M]" choice
+            [ $choice = 'Y' ] && git push origin HEAD:refs/for/$branch
+            [ $choice = 'M' ] && {
+                read -p "Input commit branch: " branch
+                git push origin HEAD:refs/for/$branch
+            }
+            cd - >/dev/null
+        done
+        return 0
+    }
+    [ $arg2 = "--diff" ] && {
+        [ -s .$script_name/$CP_CHECK ] || {
+            echo -e "\033[43;37m !!Execute the --check option first \033[0m"
+            return -1
+        }
+        echo "diff check @ "$(date) >.$script_name/cp_check.diff
+        awk '/^project / {if (NR!=1) print project, count; project=$0; count=0; next} {count+=gsub(/HEAD@/,"&")} END {print project, count}' .$script_name/$CP_CHECK >.$script_name/$CP_CHECK.tmp
+        while IFS=' ' read -r -a line
+        do
+            [[ ${line[0]} = 'project' ]] && {
+                echo -e "\n-${line[@]}" >>.$script_name/cp_check.diff
+                cd ${line[1]}
+                index=0
+                until [ ! $index -lt ${line[2]} ]
+                do
+                    git show HEAD@{$index} >>$current_path/.$script_name/cp_check.diff
+                    echo -e "\n--------------------------------------------------------------------------------\n" >>$current_path/.$script_name/cp_check.diff
+                    index=`expr $index + 1`
+                done
+                git clean -df
+                cd - >/dev/null
+            }
+        done <.$script_name/$CP_CHECK.tmp
+        return 0
+    }
+    [ $arg2 = "--undo" ] && {
+        [[ $arg3 = "assign" ]] && {
+            [ "$last_cmd" = 'assign' ] && echo "!Seems like something is missing" && return -1
+            ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$last_cmd >.$script_name/cp_packet.txt
+            grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$last_cmd >.$script_name/cp_packet.txt
+                grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                    ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set topic:$last_cmd >.$script_name/cp_packet.txt
+                    grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                        ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set hashtag:$last_cmd >.$script_name/cp_packet.txt
+                        grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                            echo "!!Invalid commit info" && return -1
+                        }
+                    }
+                }
+            }
+            readarray -t projects < <(awk -F'project: firmware/huamiOS/' '{print $2}' .$script_name/cp_project.temp)
+            for project in "${projects[@]}"; do
+                cd $project
+                git reset --hard HEAD^
+                cd - >/dev/null
+                repo sync $project
+            done
+            rm .$script_name/cp_packet.txt
+            rm .$script_name/cp_project.temp
+            return 0
+        }
+        [ -f .$script_name/$CP_FAIL ] && rm .$script_name/$CP_FAIL
+        touch .$script_name/$CP_FAIL
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then pwd >>'$current_path'/.$script_name/$CP_FAIL; fi'
+        wc -l .$script_name/$CP_FAIL >.$script_name/tmp.txt
+        cherrypicking=$(awk '{print $1}' .$script_name/tmp.txt)
+        rm .$script_name/tmp.txt
+        echo "undo cherry-pick @ "$(date) >.$script_name/$CP_UNDO
+        [ $cherrypicking -gt 0 ] && {
+            while IFS= read -r line
+            do
+                echo -e "\n- $line" |tee -a $current_path/.$script_name/$CP_UNDO
+                echo "**git cherry-pick --abort" |tee -a .$script_name/$CP_UNDO
+                cd $line
+                git cherry-pick --abort >>$current_path/.$script_name/$CP_UNDO 2>&1
+                git clean -df
+                cd - >/dev/null
+            done <.$script_name/$CP_FAIL
+        }
+        [ -s .$script_name/$CP_CHECK ] || {
+            echo -e "\033[43;37m !!Execute the --check option first \033[0m"
+            return -1
+        }
+        awk '/^project / {if (NR!=1) print project, count; project=$0; count=0; next} {count+=gsub(/HEAD@/,"&")} END {print project, count}' .$script_name/$CP_CHECK >.$script_name/$CP_CHECK.tmp
+        while IFS=' ' read -r -a line
+        do
+            [[ ${line[0]} = 'project' ]] && {
+                echo -e "\n- ${line[@]}" |tee -a .$script_name/$CP_UNDO
+                cd ${line[1]}
+                git log --oneline -${line[2]} |tee -a $current_path/.$script_name/$CP_UNDO
+                echo "**git reset --hard HEAD~${line[2]}" |tee -a $current_path/.$script_name/$CP_UNDO
+                git reset --hard HEAD~${line[2]} >>$current_path/.$script_name/$CP_UNDO 2>&1
+                git clean -df
+                cd - >/dev/null
+            }
+        done <.$script_name/$CP_CHECK.tmp
+        [ $last_cmd = '?' ] || rm .$script_name/$CP_CHECK.tmp >/dev/null
+        return 0
+    }
+    [ $arg2 = "-m" ] && {
+        ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$arg3 >.$script_name/cp_packet.txt
+        grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+            ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$arg3 >.$script_name/cp_packet.txt
+            grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set topic:$arg3 >.$script_name/cp_packet.txt
+                grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                    ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set hashtag:$arg3 >.$script_name/cp_packet.txt
+                    grep -w "project:" .$script_name/cp_packet.txt >.$script_name/cp_project.temp || {
+                        echo "!!Invalid commit info" && exit -1
+                    }
+                }
+            }
+        }
+        [ $last_cmd = '--counter' ] && {
+            local total_insertions=0
+            local total_deletions=0
+            while read -r line; do
+                if [[ $line =~ sizeInsertions:\ ([0-9]+) ]]; then
+                    total_insertions=$((total_insertions + BASH_REMATCH[1]))
+                elif [[ $line =~ sizeDeletions:\ ([0-9]+) ]]; then
+                    total_deletions=$((total_deletions + BASH_REMATCH[1]))
+                fi
+            done < .$script_name/cp_packet.txt
+            echo "Total insertions: $total_insertions"
+            echo "Total deletions: $total_deletions"
+            return 0
+        }
+        link_code_path=`awk -F " " '{print $2}' .$script_name/cp_project.temp` 
+        project_dir=$(< .$script_name/cp_project.temp)
+        OLD_IFS="$IFS"
+        IFS=$'\n'
+        project_dir=($project_dir)
+        IFS="$OLD_IFS"
+        readarray -t link_code_path <<<$link_code_path
+        code_path=`awk -v IGNORECASE=1 -F "huamiOS/" '{print $2}' .$script_name/cp_project.temp` 
+        readarray -t code_path <<<$code_path
+        grep -w "status:" .$script_name/cp_packet.txt >.$script_name/cp_project_status.temp 
+        commit_status=`awk -F ":" '{print $2}' .$script_name/cp_project_status.temp`
+        readarray -t commit_status <<<$commit_status
+        grep -w "isPrivate:" .$script_name/cp_packet.txt >>.$script_name/cp_project_status.temp 
+        private_status=`awk -F ":" '{print $2}' .$script_name/cp_project_status.temp`
+        readarray -t private_status <<<$private_status
+        grep -w "ref:" .$script_name/cp_packet.txt >.$script_name/cp_project_ref.temp 
+        commit_refs=`awk -F ":" '{print $2}' .$script_name/cp_project_ref.temp`
+        readarray -t commit_refs <<<$commit_refs
+        [ $last_cmd = '?' ] || rm .$script_name/cp*.temp; rm .$script_name/cp_packet.txt
+        echo "$"$do_cmd" "$last_cmd"  @"$(date) >.$script_name/$CP_LOG
+        for ((index = ${#link_code_path[@]} - 1; index >= 0 ; index--))
+        do
+            if [ ${commit_status[index]} = "ABANDONED" ]; then
+                echo "- project: "${link_code_path[index]}" - "${commit_refs[index]}
+                echo "status: ""ABANDONED"
+                continue
+            fi
+            if [ ${private_status[index]} = "true" ]; then
+                echo "- project: "${link_code_path[index]}" - "${commit_refs[index]}
+                echo "status: ""isPrivate: true"
+                continue
+            fi
+            [ $last_cmd = "work" ] && {
+                if [ ${commit_status[index]} = "MERGED" ]; then
+                    echo "- project: "${link_code_path[index]}" - "${commit_refs[index]}
+                    echo "status: ""MERGED"
+                    continue
+                fi
+            }
+            echo >>.$script_name/$CP_LOG
+            echo "[$index]: "${code_path[index]}" - "${commit_refs[index]}" - "${commit_status[index]} >>.$script_name/$CP_LOG
+            cd ${code_path[index]}
+            echo -e "\n-"${project_dir[index]}
+            git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/${link_code_path[index]} ${commit_refs[index]} && git cherry-pick FETCH_HEAD |tee -a $current_path/.$script_name/$CP_LOG
+            cd - >/dev/null
+        done
+    }
+    return 0
+}
+function map_sort {
+    matches=$(grep -n "==========" .$script_name/map_parse_memory.txt)
+    readarray -t matches <<<$matches
+    line_numbers=()
+    for match in "${matches[@]}"; do
+        line_numbers+=( "$(cut -d: -f1 <<< "$match")" )
+    done
+    temp_file=$(mktemp)
+    let N=${line_numbers[1]}+1
+    let M=${line_numbers[2]}-1
+    [ $last_cmd = '?' ] && echo "N: "$N "M: "$M
+    sed -n "${N},${M}p" .$script_name/map_parse_memory.txt >$temp_file
+    file_map_sort=.$script_name/map_sort.txt
+    echo -e $(date)"\n" >$file_map_sort
+    echo -e "ROM SORT:" >>$file_map_sort
+    head -n ${line_numbers[1]} .$script_name/map_parse_memory.txt >>$file_map_sort
+    sort -nr -k4 $temp_file >>$file_map_sort
+    awk "NR>$M" .$script_name/map_parse_memory.txt >>$file_map_sort
+    sed -n "${N},${M}p" .$script_name/map_parse_memory.txt >$temp_file
+    echo -e "\r\nRAM SORT:" >>$file_map_sort
+    head -n ${line_numbers[1]} .$script_name/map_parse_memory.txt >>$file_map_sort
+    sort -nr -k6 $temp_file >>$file_map_sort
+    awk "NR>$M" .$script_name/map_parse_memory.txt >>$file_map_sort
+    cat $file_map_sort
+    rm $temp_file
+}
+function map {
+    spin &
+    pid=$!
+    map_file=$(find . -type f -name "watch@*.map")
+    [ ! map_file ] && echo -e "\n!!No compiled map file found" && exit 0
+    cp $scripts_path/map_memory_parse_gcc.py .
+    module=$arg4
+    case $arg3 in
+        --parse)
+            python map_memory_parse_gcc.py $map_file $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --find)
+            python map_memory_parse_gcc.py $map_file find $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --exec)
+            python map_memory_parse_gcc.py $map_file find --exe $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --sort)
+            python map_memory_parse_gcc.py $map_file >.$script_name/map_parse_memory.txt
+            map_sort
+            ;;
+        *)
+            python map_memory_parse_gcc.py $map_file |tee .$script_name/map_parse_memory.txt
+            ;;
+    esac
+    kill $pid >/dev/null 2>&1 && printf '\rDone!\n'
+    rm map_memory_parse_gcc.py
+    return 0
+}
+function display-wearable {
+    case $arg3 in
+        --assign)
+            simple_select_config $arg4
+            local width=$(cat configs/${config_select%%_*}/$config_select |grep 'STORYBOARD_DISPLAY_WIDTH=' |cut -d '=' -f 2)
+            local height=$(cat configs/${config_select%%_*}/$config_select |grep 'STORYBOARD_DISPLAY_HEIGHT=' |cut -d '=' -f 2)
+            echo $config_select "(WxH): " $width "*" $height
+            ;;
+        *)
+            for dir in configs/*; do
+                if [[ -d "$dir" && "$dir" != "." && "$dir" != ".." ]]; then
+                    echo -e "\n** "$dir":"
+                    shopt -s nullglob
+                    files=("$dir"/"$(basename "$dir")"_*_defconfig)
+                    shopt -u nullglob
+                    for file in "${files[@]}"; do
+                        if [[ -f "$file" ]]; then
+                            local width=$(cat $file |grep 'STORYBOARD_DISPLAY_WIDTH=' |cut -d '=' -f 2)
+                            local height=$(cat $file |grep 'STORYBOARD_DISPLAY_HEIGHT=' |cut -d '=' -f 2)
+                            local underscore_count=$(echo "$file" |tr '_' '\n' |wc -l)
+                            [[ $underscore_count -eq 3 && $width && $height ]] && echo $(basename "$file") "(WxH): " $width "*" $height
+                        fi
+                    done
+                fi
+            done
+            ;;
+    esac
+    return 0
+}
+function deduplicate_changelog_process {
+    changelog=$1
+    local duplicate_changelog="duplicate.changelog"
+    [ -f $duplicate_changelog ] && rm $duplicate_changelog
+    touch $duplicate_changelog
+    mv $duplicate_changelog $CHANGELOG_OUT
+    duplicate_changelog=$CHANGELOG_OUT/$duplicate_changelog
+    local deduplicate_changelog="deduplicate.changelog"
+    [[ -n "$2" ]] && deduplicate_changelog="$2"
+    [ -f $deduplicate_changelog ] && rm $deduplicate_changelog
+    touch $deduplicate_changelog
+    mv $deduplicate_changelog $CHANGELOG_OUT
+    deduplicate_changelog=$CHANGELOG_OUT/$deduplicate_changelog
+    local changelog_process="process.log"
+    [ -f $changelog_process ] && rm $changelog_process
+    touch $changelog_process
+    mv $changelog_process $CHANGELOG_OUT
+    changelog_process=$CHANGELOG_OUT/$changelog_process
+    local changelog_check="check.log"
+    [ -f $changelog_check ] && rm $changelog_check
+    touch $changelog_check
+    mv $changelog_check $CHANGELOG_OUT
+    changelog_check=$CHANGELOG_OUT/$changelog_check
+    local processed_project_count=0
+    local history_duplicate_single_repository_linenumbers=0
+    local history_deduplicate_single_repository_linenumbers=0
+    local process_item_count=$(grep " changed from " $changelog |wc -l)
+    local temp_file="$(mktemp)"
+    tac $changelog > reverse_$changelog
+    while IFS= read -r parent_line; do
+        echo $parent_line >> $temp_file
+        [[ "$parent_line" == *" changed from "* ]] && {
+            processed_project_count=$((processed_project_count + 1))
+            cp $temp_file pending_changelog 
+            awk 'NF' $temp_file > cache_changelog 
+            cp cache_changelog $temp_file
+            local origin_single_repository_linenumbers=$(awk 'NF' $temp_file | wc -l)
+            local name_single_repository=$(grep " changed from " $temp_file | awk '{print $1}')
+            local sub_temp_file="$(mktemp)"
+            local temp_duplicate="duplicate.temp"
+            [ $last_cmd = '?' ] && {
+                [ -f $temp_duplicate ] && rm $temp_duplicate
+                touch $temp_duplicate
+                echo -e "\r\n****** Start [$processed_project_count]"  >>$changelog_process
+            }
+            local processed_count=0
+            while IFS= read -r line; do
+                processed_count=$((processed_count + 1))
+                [ $last_cmd = '?' ] && echo -e "\r\n## Start [$processed_count]"  >>$changelog_process
+                local already_processed=$(grep -F "$line" cache_changelog)
+                [ -z "$already_processed" ] && {
+                    [ $last_cmd = '?' ] && echo -e "\r\nAlready processed: $line"  >> $changelog_process
+                    continue
+                }
+                local jira_describe=$(echo "$line" | grep '[+-]' | awk -F "|" '{print $2}')
+                [ -z "$jira_describe" ] && {
+                    [ $last_cmd = '?' ] && echo -e "\r\nInvalid Describe -> $line" >> $changelog_process
+                    continue
+                }
+                local jira_commit_hash=$(echo "$line" | grep '[+-]' | awk '{print $2}')
+                [ -z "$jira_commit_hash" ] && {
+                    [ $last_cmd = '?' ] && echo -e "\r\nInvalid Hash -> $line" >> $changelog_process
+                    continue
+                }
+                sed -i "/\b$jira_commit_hash\b/d" cache_changelog
+                [ $last_cmd = '?' ] && {
+                    echo -e "\r\n"$jira_commit_hash >> $changelog_process
+                    echo "hit sed" >> $changelog_process
+                    echo "cache changelog line: "$(awk 'NF' cache_changelog |wc -l) >> $changelog_process
+                    echo "describe: "$jira_describe >> $changelog_process
+                }
+                local jira_describe_prefix=$(echo "$line" | grep '[+-]' | awk -F "|" '{print $1}')
+                [ $last_cmd = '?' ] && echo -e "\r\njira  prefix: "$jira_describe_prefix "describe: "$jira_describe  >>$changelog_process
+                local jira_commit_status=$(echo "$jira_describe_prefix" | grep '[+-]' | awk '{print $1}')
+                local jira_commit_reason=$(echo "$jira_describe_prefix" | grep '[+-]' | awk '{print $3}')
+                [ $last_cmd = '?' ] && echo "jira commit  status: "$jira_commit_status "reason: "$jira_commit_reason  >>$changelog_process
+                [[ $jira_commit_reason = 'Merge' ]] && {
+                    [ $last_cmd = '?' ] && echo -e "\r\n@@Merge  $line"  >>$changelog_process
+                    [ -z "$jira_commit_hash" ] && echo "sed error: $line"
+                    sed -i "/\b$jira_commit_hash\b/d" pending_changelog
+                    echo "$line" >> $duplicate_changelog
+                    [ $last_cmd = '?' ] && {
+                        local result=$(grep $jira_commit_hash $temp_duplicate | wc -l)
+                        [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat -> $line"  >>$changelog_process
+                        echo "$line" >> $temp_duplicate
+                    }
+                    continue
+                }
+                local process_mode=1
+                local describe_match_mode=1
+                local commit_match_mode=0
+                if [ $process_mode -eq 0 ]; then
+                    cat cache_changelog > $sub_temp_file
+                else
+                    jira_describe=${jira_describe%\"}
+                    [ $last_cmd = '?' ] && echo "processed describe: "$jira_describe >> $changelog_process
+                    grep -wF "$jira_describe" cache_changelog > $sub_temp_file
+                    [ $last_cmd = '?' ] && echo "cache changelog line: "$(awk 'NF' cache_changelog |wc -l)"  sub file line: "$(awk 'NF' $sub_temp_file |wc -l) >> $changelog_process
+                    [ $last_cmd = '?' ] && cat $sub_temp_file >> $changelog_process
+                    local same_linenumbers=$(awk 'NF' $sub_temp_file | wc -l)
+                    [ $last_cmd = '?' ] && echo "same line: "$same_linenumbers >> $changelog_process
+                    [ $same_linenumbers -eq 0 ] && continue
+                fi
+                local repository=. 
+                [[ $last_cmd = '?' && $(grep $repository $temp_file) ]] && {
+                    echo -e "\r\n>>>>>> ($processed_project_count)"  >>$changelog_process
+                    echo "$line"  >>$changelog_process
+                    echo -e "\r\n======"  >>$changelog_process
+                    cat $sub_temp_file  >>$changelog_process
+                    echo -e "\r\n<<<<<<"  >>$changelog_process
+                    cat pending_changelog  >>$changelog_process
+                    echo -e "\r\n------"  >>$changelog_process
+                }
+                [ $last_cmd = '?' ] && echo -e "\r\n## Start(sub)"  >>$changelog_process
+                local sub_cycle=0
+                while IFS= read -r sub_line <&3; do
+                    sub_cycle=$((sub_cycle + 1))
+                    [[ $last_cmd = '?' && $(grep $repository $temp_file) ]] && {
+                        echo -e "\r\n>>>>>> Sub($sub_cycle)"  >>$changelog_process
+                        echo "target: $line"  >>$changelog_process
+                        echo "sub: $sub_line"  >>$changelog_process
+                        echo -e "\r\n======"  >>$changelog_process
+                        cat $temp_duplicate  >>$changelog_process
+                        echo -e "\r\n<<<<<<"  >>$changelog_process
+                    }
+                    local sub_jira_describe=$(echo "$sub_line" | grep '[+-]' | awk -F "|" '{print $2}')
+                    local sub_jira_describe_prefix=$(echo "$sub_line" | grep '[+-]' | awk -F "|" '{print $1}')
+                    [ $last_cmd = '?' ] && echo "sub jira  prefix: "$sub_jira_describe_prefix "describe: "$sub_jira_describe  >>$changelog_process
+                    local sub_jira_commit_status=$(echo "$sub_jira_describe_prefix" | grep '[+-]' | awk '{print $1}')
+                    local sub_jira_commit_hash=$(echo "$sub_jira_describe_prefix" | grep '[+-]' | awk '{print $2}')
+                    local sub_jira_commit_reason=$(echo "$sub_jira_describe_prefix" | grep '[+-]' | awk '{print $3}')
+                    [ $last_cmd = '?' ] && echo "jira commit  status: "$sub_jira_commit_status "reason: "$sub_jira_commit_reason  >>$changelog_process
+                    [[ $sub_jira_commit_reason = 'Merge' ]] && {
+                        [ $last_cmd = '?' ] && echo -e "\r\n@@Merge(sub)  $sub_line"  >>$changelog_process
+                        [[ ! $sub_jira_commit_hash ]] && echo "sed error: $sub_line"
+                        sed -i "/\b$sub_jira_commit_hash\b/d" pending_changelog
+                        sed -i "/\b$sub_jira_commit_hash\b/d" cache_changelog
+                        echo "$sub_line" >> $duplicate_changelog
+                        [ $last_cmd = '?' ] && {
+                            local result=$(grep $sub_jira_commit_hash $temp_duplicate | wc -l)
+                            [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat(sub) -> $sub_line"  >>$changelog_process
+                            echo "$sub_line" >> $temp_duplicate
+                        }
+                        continue
+                    }
+                    sub_jira_describe=${sub_jira_describe%\"}
+                    [ $last_cmd = '?' ] && echo "processed describe(sub): "$sub_jira_describe >>$changelog_process
+                    [[ ($describe_match_mode = 1 && "$jira_describe" != "$sub_jira_describe") || \
+                       ($describe_match_mode = 0 && "$jira_describe" != *"$sub_jira_describe"* && "$sub_jira_describe" != *"$jira_describe"*) ]] && {
+                        [ $last_cmd = '?' ] && {
+                            echo -e "\r\n!Warning: jira describe not match" >> $changelog_process
+                            echo "describe: "$jira_describe  >>$changelog_process
+                            echo "describe(sub): "$sub_jira_describe  >>$changelog_process
+                        }
+                        continue
+                    }
+                    [[ "$jira_commit_status" = "$sub_jira_commit_status" ]] && {
+                        [[ $jira_commit_reason = 'Revert' || $sub_jira_commit_reason = 'Revert' ]] && {
+                            [ $commit_match_mode = 1 ] && {
+                                local revert_commit_hash=$(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$jira_commit_hash |grep -w "This reverts commit" |awk '{print $4}')
+                                local sub_revert_commit_hash=$(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$sub_jira_commit_hash |grep -w "This reverts commit" |awk '{print $4}')
+                                [ $last_cmd = '?' ] && {
+                                    echo -e "\r\n@Revert process"  >>$changelog_process
+                                    echo "Target commit  $jira_commit_hash"  >>$changelog_process
+                                    echo "Reverts commit  $revert_commit_hash"  >>$changelog_process
+                                    echo "Reverts commit(sub)  $sub_revert_commit_hash"  >>$changelog_process
+                                }
+                                [[ "$sub_revert_commit_hash" != *"$jira_commit_hash"* && "$revert_commit_hash" != *"$sub_jira_commit_hash"* ]] && {
+                                    [ $last_cmd = '?' ] && echo -e "\r\n!Warning: Revert not match"  >>$changelog_process
+                                    continue
+                                }
+                            }
+                            [ $last_cmd = '?' ] && echo -e "\r\n@@Revert  $line"  >>$changelog_process && echo $sub_line  >>$changelog_process
+                            sed -i "/\b$jira_commit_hash\b/d" pending_changelog
+                            sed -i "/\b$sub_jira_commit_hash\b/d" pending_changelog
+                            sed -i "/\b$sub_jira_commit_hash\b/d" cache_changelog
+                            [ $last_cmd = '?' ] && {
+                                local result=$(grep $jira_commit_hash $temp_duplicate | wc -l)
+                                [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat -> $line"  >>$changelog_process
+                                echo "$line" >> $temp_duplicate
+                            }
+                            echo "$line" >> $duplicate_changelog
+                            [ $last_cmd = '?' ] && {
+                                local result=$(grep $sub_jira_commit_hash $temp_duplicate | wc -l)
+                                [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat(sub) -> $sub_line"  >>$changelog_process
+                                echo "$sub_line" >> $temp_duplicate
+                            }
+                            echo "$sub_line" >> $duplicate_changelog
+                            break
+                        }
+                    }
+                    [[ "$jira_commit_status" != "$sub_jira_commit_status" ]] && {
+                        [[ $jira_commit_reason = $sub_jira_commit_reason ]] && {
+                            [ $commit_match_mode = 1 ] && {
+                                readarray -t temp_describe < <(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$jira_commit_hash |grep -w "subject:" |awk -F "|" '{print $2}')
+                                readarray -t temp_change < <(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$jira_commit_hash |grep -w "change" |awk '{print $2}')
+                                [ $last_cmd = '?' ] && echo "temp_describe: ${temp_describe[*]}"  >>$changelog_process
+                                local index=0
+                                [ ${#temp_describe[*]} -lt 1 ] && {
+                                    [ $last_cmd = '?' ] && echo -e "\r\n!!Error: not find describe"  >>$changelog_process
+                                    continue
+                                }
+                                [ $last_cmd = '?' ] && echo "target describe: $jira_describe"  >>$changelog_process
+                                for describe in "${temp_describe[@]}"; do
+                                    [[ "$describe" = "$jira_describe" ]] && break
+                                    ((index++))
+                                done
+                                [ $index -eq ${#temp_describe[@]} ] && {
+                                    [ $last_cmd = '?' ] && echo -e "\r\n!!Error: not find same describe"  >>$changelog_process && echo ${temp_describe[@]}  >>$changelog_process
+                                    continue
+                                }
+                                [ $last_cmd = '?' ] && echo "temp_change: ${temp_change[*]}"  >>$changelog_process
+                                local changeid=${temp_change[$index]}
+                                [ $last_cmd = '?' ] && echo "changeid: $changeid"  >>$changelog_process
+                                readarray -t temp_describe < <(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$sub_jira_commit_hash |grep -w "subject:" |awk -F "|" '{print $2}')
+                                readarray -t temp_change < <(ssh -n -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$sub_jira_commit_hash |grep -w "change" |awk '{print $2}')
+                                [ $last_cmd = '?' ] && echo "temp_describe(sub): ${temp_describe[*]}"  >>$changelog_process
+                                [ ${#temp_describe[*]} -lt 1 ] && {
+                                    [ $last_cmd = '?' ] && echo -e "\r\n!!Error: not find describe(sub)"  >>$changelog_process
+                                    continue
+                                }
+                                [ $last_cmd = '?' ] && echo "target describe(sub): $sub_jira_describe"  >>$changelog_process
+                                local index=0
+                                for describe in "${temp_describe[@]}"; do
+                                    [[ "$describe" = "$sub_jira_describe" ]] && break
+                                    ((index++))
+                                done
+                                [ $index -eq ${#temp_describe[@]} ] && {
+                                    [ $last_cmd = '?' ] && echo -e "\r\n!!Error: not find same describe(sub)"  >>$changelog_process && echo ${temp_describe[@]}  >>$changelog_process
+                                    continue
+                                }
+                                [ $last_cmd = '?' ] && echo "change: ${temp_change[*]}"  >>$changelog_process
+                                local sub_changeid=${temp_change[$index]}
+                                [ $last_cmd = '?' ] && echo "sub_changeid: $sub_changeid"  >>$changelog_process
+                                [ $last_cmd = '?' ] && {
+                                    echo -e "\r\n@Cherry-pick process"  >>$changelog_process
+                                    echo "Target change-id  $changeid"  >>$changelog_process
+                                    echo "Cherry-pick change-id  $sub_changeid"  >>$changelog_process
+                                }
+                                [[ "$changeid" != "$sub_changeid" ]] && {
+                                    [ $last_cmd = '?' ] && echo  -e "\r\n!Warning: Cherry-pick not match"  >>$changelog_process
+                                    continue
+                                }
+                            }
+                            [ $last_cmd = '?' ] && echo -e "\r\n@@[+-]  $line"  >>$changelog_process && echo "$sub_line"  >>$changelog_process
+                            [[ ! $jira_commit_hash ]] && echo "sed error: $line"
+                            sed -i "/\b$jira_commit_hash\b/d" pending_changelog
+                            [[ ! $sub_jira_commit_hash ]] && echo "sub sed error: $sub_line"
+                            sed -i "/\b$sub_jira_commit_hash\b/d" pending_changelog
+                            sed -i "/\b$sub_jira_commit_hash\b/d" cache_changelog
+                            [ $last_cmd = '?' ] && {
+                                local result=$(grep $jira_commit_hash $temp_duplicate | wc -l)
+                                [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat -> $line"  >>$changelog_process
+                                echo "$line" >> $temp_duplicate
+                            }
+                            echo "$line" >> $duplicate_changelog
+                            [ $last_cmd = '?' ] && {
+                                local result=$(grep $sub_jira_commit_hash $temp_duplicate | wc -l)
+                                [ $result -gt 1 ] && echo -e "\r\nxxxxxx Repeat(sub)-> $sub_line"  >>$changelog_process
+                                echo "$sub_line" >> $temp_duplicate
+                            }
+                            echo "$sub_line" >> $duplicate_changelog
+                            break
+                        }
+                    }
+                done 3< $sub_temp_file
+            done < $temp_file
+            cat pending_changelog >> $deduplicate_changelog
+            echo -e "$parent_line\r\n" >> $duplicate_changelog
+            [[ ${EXEC_PARAMS[@]} =~ 'check' ]] && {
+                local temp_duplicate_linenumbers=$(awk 'NF' $duplicate_changelog | wc -l)
+                local duplicate_single_repository_linenumbers=$((temp_duplicate_linenumbers - history_duplicate_single_repository_linenumbers))
+                local temp_deduplicate_linenumbers=$(awk 'NF' $deduplicate_changelog | wc -l)
+                local deduplicate_single_repository_linenumbers=$((temp_deduplicate_linenumbers - history_deduplicate_single_repository_linenumbers))
+                local process_single_repository_linenumbers=$((duplicate_single_repository_linenumbers + deduplicate_single_repository_linenumbers))
+                process_single_repository_linenumbers=$((process_single_repository_linenumbers - 1))
+                local process_result="√"
+                [[ $origin_single_repository_linenumbers != $process_single_repository_linenumbers ]] && process_result="×"
+                echo "[$process_result] project($processed_project_count) " $name_single_repository": " $((origin_single_repository_linenumbers - 1))" " $((deduplicate_single_repository_linenumbers - 1))" "$((duplicate_single_repository_linenumbers - 1)) >> $changelog_check
+                history_duplicate_single_repository_linenumbers=$temp_duplicate_linenumbers
+                history_deduplicate_single_repository_linenumbers=$temp_deduplicate_linenumbers
+            }
+            > $temp_file 
+            rm $sub_temp_file
+            echo $((processed_project_count * 100 / process_item_count)) >$spin_percent_file
+        }
+    done < reverse_$changelog
+    tac $duplicate_changelog > pending_changelog
+    cp pending_changelog $duplicate_changelog
+    tac $deduplicate_changelog > pending_changelog
+    cp pending_changelog $deduplicate_changelog
+    [[ ${EXEC_PARAMS[@]} =~ 'check' ]] && {
+        echo "status    item    project    origin  deduplicate  duplicate" >> $changelog_check
+        local dup_number=$(awk 'NF' $duplicate_changelog | wc -l)
+        local dedup_number=$(awk 'NF' $deduplicate_changelog | wc -l)
+        local changelog_number=$(awk 'NF' $changelog | wc -l)
+        local changelog_other_number=$(awk '/added projects/,/changed projects/ { if (NF) count++ } END { print count }' $changelog)
+        local origin_count=$((changelog_number - changelog_other_number))
+        local dup_item_count=$(grep " changed from " $duplicate_changelog |wc -l)
+        local processed_count=$((dup_number - dup_item_count + dedup_number))
+        echo -e "\r\norigin changelog item count: "$process_item_count "line number: $changelog_number - $changelog_other_number = "$origin_count >> $changelog_check
+        echo "processed line number: dup_number($dup_number) - dup_item_count($dup_item_count) + dedup_number($dedup_number) = "$processed_count >> $changelog_check
+        [ $origin_count = $processed_count ] && echo "Processed Progress: OK" |tee -a $changelog_check || echo "Processed Progress: Error" |tee -a $changelog_check
+        [ $process_mode -eq 0 ] && mode0="Match Mode: LineByLine" || mode0="Match Mode: FilterString"
+        [ $describe_match_mode -eq 0 ] && mode1="KeyWord" || mode1="WholeWord"
+        [ $commit_match_mode -eq 0 ] && mode2="Rules" || mode2="Accurate"
+        echo "$mode0  $mode1  $mode2" >> $changelog_check
+        echo "## generate by "$GERRIT_USER "  @"$(date) >> $changelog_check
+        tac $changelog_check > pending_changelog
+        cp pending_changelog $changelog_check
+    }
+    rm $temp_file
+    rm cache_changelog
+    rm pending_changelog
+    rm reverse_$changelog
+    [ -f $temp_duplicate ] && rm $temp_duplicate
+    return 0
+}
+module_hit_table=("sport")
+sport_module=("framework/engine/sportEngine/" "packages/apps/sports" "packages/services/sport" "ui/Sports" "ui/SportRecord" "ui/SportSecondary" "ui/SportStatus")
+function changelog_find_owner {
+    local counter=1
+    local sub_counter=1
+    local module_hit=""
+    local assign_name=""
+    local commit_hash_repeat="commit_hash_repeat.txt"
+    local changelog_error="changelog.error"
+    local changelog_out="_out.txt"
+    local output_type="txt"
+    read -p "input file: " changelog
+    [ ! $changelog ] && changelog="changelog.txt"
+    [ ! -f $changelog ] && {
+        echo "!! file $changelog not exist"
+        return -1
+    }
+    local processed_task_count=0
+    local task_count=$(grep " changed from " $changelog |wc -l)
+    spin &
+    pid=$!
+    [[ -d $CHANGELOG_OUT ]] && rm -rf $CHANGELOG_OUT
+    mkdir $CHANGELOG_OUT
+    [[ ${EXEC_PARAMS[@]} =~ '--deduplicate' ]] && {
+        local deduplicate_changelog="deduplicate.changelog"
+        deduplicate_changelog_process $changelog $deduplicate_changelog
+        changelog=$CHANGELOG_OUT/$deduplicate_changelog
+        [[ $last_cmd = 'only' ]] && {
+            kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+            return 0
+        }
+        echo -e "\nDeduplicate changelog complete!"
+    }
+    echo -e "\nFormatting..."
+    [[ ${EXEC_PARAMS[@]} =~ '--out-format' ]] && {
+        get_option_index_ande_value --out-format
+        if [[ "$OPTION_VALUE" == 'md' ]]; then
+            changelog_out="_out.md"
+            output_type="md"
+        elif [[ "$OPTION_VALUE" == 'table' ]]; then
+            changelog_out="_out.md"
+            output_type="table"
+        elif [[ "$OPTION_VALUE" == 'csv' ]]; then
+            changelog_out="_out.csv"
+            output_type="csv"
+        elif [[ "$OPTION_VALUE" == 'html' ]]; then
+            changelog_out="_out.html"
+            output_type="html"
+        fi
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--assign' ]] && {
+        get_option_index_ande_value --assign
+        if [ -z "${OPTION_VALUE:-}" ];then
+            changelog_out="assign_${changelog_out}"
+        else
+            assign_name="$OPTION_VALUE"
+            changelog_out="${assign_name}_${changelog_out}"
+        fi
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--module' ]] && {
+        module_hit="ALL"
+        get_option_index_ande_value --module
+        if [ -n "$OPTION_VALUE" ];then
+            for module in "${module_hit_table[@]}"; do
+                if [[ "$OPTION_VALUE" == "$module" ]]; then
+                    module_hit=$OPTION_VALUE
+                fi
+            done
+        fi
+        echo -e "\nmodule_hit: $module_hit"
+        [ -z "$module_hit" ] && echo -e "\e[7;33mPlease check module name\e[0m"
+        changelog_out=${module_hit}_$changelog_out
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '--type' ]] && {
+        get_option_index_ande_value --type
+        filter_type=$OPTION_VALUE
+    }
+    changelog_out="${changelog_out}"
+    [ -f $changelog_out ] && rm $changelog_out
+    touch $changelog_out
+    [ -f $changelog_error ] && rm $changelog_error
+    touch $changelog_error
+    [ -f $commit_hash_repeat ] && rm $commit_hash_repeat
+    touch $commit_hash_repeat
+    local changelog_prefix=`date +"%y%m%d%H%M"`
+    changelog_prefix="changelog_out_"$changelog_prefix
+    mkdir $changelog_prefix
+    mv $changelog_out $changelog_prefix
+    changelog_out=$changelog_prefix/$changelog_out
+    mv $changelog_error $changelog_prefix
+    changelog_error=$changelog_prefix/$changelog_error
+    mv $commit_hash_repeat $changelog_prefix
+    commit_hash_repeat=$changelog_prefix/$commit_hash_repeat
+    local temp_file="$(mktemp)"
+    if [[ "$output_type" == "table" ]]; then
+        echo "| Where | Index | Owner | Jira | Gerrit |" >$changelog_out
+        echo "| ----- | ----- | ----- | ---- | ------ |" >>$changelog_out
+    elif [[ "$output_type" == "csv" ]]; then
+        echo "Where,Index,Owner,Commit,Jira" >$changelog_out
+    elif [[ "$output_type" == "html" ]]; then
+        echo -e "<style>\n  table {\n    border-collapse: collapse;\n    width: 100%;\n  }\n  th, td {\n    text-align: left;\n\
+    padding: 8px;\n    border: 1px solid #ddd;\n    white-space: nowrap;\n  }\n</style>\n" >$changelog_out
+        if [ -n "${filter_type:-}" ]; then
+            echo -e "<div class="table-title">@$(date) by $GERRIT_USER    #处理类型：${filter_type}</div>" >>$changelog_out
+        else
+            echo -e "<div class="table-title">@$(date) by $GERRIT_USER</div>" >>$changelog_out
+        fi
+        echo -e "<table>\n  <tr>\n    <th>Index</th>\n    <th>Owner</th>\n    <th>Jira</th>\n    <th>Gerrit</th>\n    <th>Where</th>\n  </tr>\n" >>$changelog_out
+    fi
+    local find_done=0
+    while IFS= read -r line <&3; do
+        [[ "$line" == *" changed from "* ]] && {
+            processed_task_count=$((processed_task_count + 1))
+            echo $((processed_task_count * 100 / task_count)) >$spin_percent_file
+        }
+        [[ $module_hit = 'sport' ]] && {
+            if [[ "$line" == *" changed from "* ]]; then
+                find_done=0
+                for module in "${sport_module[@]}"; do
+                    if [[ "$line" == *"$module"* ]]; then
+                        find_done=1
+                        break
+                    fi
+                done
+                [[ $find_done -eq 0 ]] && continue
+            fi
+        } || find_done=1
+        [[ "$line" == *" changed from "* ]] && {
+            local project_name=$(echo "$line" |awk '{print $1}')
+            if [[ "$output_type" == "table" ]]; then
+                project_name_out="| Project: $project_name |"
+            elif [[ "$output_type" == "csv" ]]; then
+                project_name_out="Project: $project_name,"
+            elif [[ "$output_type" == "html" ]]; then
+                project_name_out="  <tr>\n    <td colspan="5">Project: ${project_name}</td>\n  </tr>\n"
+            elif [[ "$output_type" == "md" ]]; then
+                project_name_out="**Project: ${project_name}**"
+            else
+                project_name_out="Project: $project_name"
+            fi
+            minus_node=$(echo "$line" |awk -F 'changed from' '{print $2}' |awk -F 'to' '{print $1}' |xargs)
+            plus_node=$(echo "$line" |awk -F 'changed from' '{print $2}' |awk -F 'to' '{print $2}' |xargs)
+            continue
+        }
+        if [ -n "${filter_type:-}" ]; then
+            local commit_type=$(echo "$line" | grep -E '\[\+|\[-\]' |awk '{print $3}')
+            [[ "$commit_type" != "$filter_type" ]] && continue
+        fi
+        [ $find_done = 1 ] && {
+            local commit_hash=$(echo "$line" | grep -E '\[\+|\[-\]' > /dev/null && echo "$line" | awk '{print $2}')
+            [[ -z "$commit_hash" ]] && continue
+            local commit_sign=$(echo "$line" |awk -F '[\\[\\]]' '{print $2}')
+            if [[ $commit_sign == '-' ]]; then
+                commit_where="$minus_node"
+            elif [[ $commit_sign == '+' ]]; then
+                commit_where="$plus_node"
+            else
+                commit_where="unKnown"
+            fi
+            ((counter++))
+            ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$commit_hash >$temp_file
+            local result_count=$(grep -w "^rowCount:" $temp_file |wc -l)
+            [ $result_count -gt 1 ] && echo "[rowCount]  $counter> $rowCount" >>$changelog_error && continue
+            local link_count=$(grep -w "^rowCount:" $temp_file | cut -d ':' -f2)
+            [[ $link_count -gt 1 ]] && {
+                echo $commit_hash >>$commit_hash_repeat
+                local commit_comment=$(echo "$line" | grep '[+-]' | awk -F "|" '{print $2}')
+                local change_number=$(grep -E -B 1 "subject: .*$commit_comment" $temp_file |grep -w 'number:' |cut -d ':' -f2)
+                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_number >$temp_file
+            }
+            local owner_name=$(grep -A 1 'owner:' $temp_file | grep 'name:' | cut -d ':' -f2)
+            local owner_describe="  【owner】 $owner_name"
+            [[ ${EXEC_PARAMS[@]} =~ '--assign' ]] && {
+                [[ ! "$owner_name" =~ "$assign_name" ]] && continue
+            }
+            [[ -n $project_name_out ]] && echo -e "$project_name_out" >>$changelog_out
+            unset project_name_out
+            if [[ "$output_type" == "md" || "$output_type" == "table" || "$output_type" == "html" ]]; then
+                local gerrit_url=$(grep 'url:' $temp_file | cut -d ' ' -f4)
+                [ ! $gerrit_url ] && echo "[gerrit-url]  $counter> $commit_hash" >>$changelog_error && continue
+                jira_describe=$(grep 'subject:' $temp_file | cut -d '|' -f2)
+                local jira_number=$(echo $jira_describe | cut -d '>' -f1 | xargs)
+                [ ! $jira_number ] && {
+                    jira_number=$(grep 'subject:' $temp_file | cut -d ' ' -f4)
+                }
+                local jira_text=$(echo $jira_describe | cut -d '>' -f2 | xargs -0)
+                [ $last_cmd = '-v' ] && echo "$counter> [$jira_number] $jira_text  $owner_name"
+                if [[ "$output_type" == "md" ]]; then
+                    echo "* ($sub_counter)  $owner_name [$jira_number](https://jira.huami.com/browse/$jira_number) > [$jira_text]($gerrit_url)" >>$changelog_out
+                elif [[ "$output_type" == "table" ]]; then
+                    echo "| $commit_where | $sub_counter | $owner_name | [$jira_number](https://jira.huami.com/browse/$jira_number) | [$jira_text]($gerrit_url) |" >>$changelog_out
+                elif [[ "$output_type" == "html" ]]; then
+                    local temp_content="  <tr>\n    <th>${sub_counter}</th>"
+                    temp_content+="\n    <th>${owner_name}</th>"
+                    temp_content+="\n    <th><a href="https://jira.huami.com/browse/$jira_number" target="_blank">${jira_number}</a></th>"
+                    temp_content+="\n    <th><a href="$gerrit_url" target="_blank">${jira_text}</a></th>" 
+                    temp_content+="\n    <th>${commit_where}</th>"
+                    temp_content+="\n  </tr>\n"
+                    echo -e $temp_content >>$changelog_out
+                fi
+                ((sub_counter++))
+            elif [[ "$output_type" == "csv" ]]; then
+                local commit_hash=$(echo "$line" |awk '{print $2}')
+                local jira1=$(echo "$line" |awk -F '|' '{print $1}' |awk '{print $3}')
+                local jira2=$(echo "$line" |awk -F '|' '{print $2}')
+                local jira_text="$jira1 | $jira2"
+                echo "$commit_where,$sub_counter,$owner_name,$commit_hash,$jira_text" >>$changelog_out
+                ((sub_counter++))
+            else
+                [[ $last_cmd = '-v' ]] && {
+                    local commit_type=$(echo "$line" | grep -E '\[\+|\[-\]' | awk '{print $3}')
+                    echo $counter">: "$commit_hash": "$owner_describe": ["$commit_type"]"
+                }
+                echo "$line" "$owner_describe" >> $changelog_out
+            fi
+        }
+    done 3< $changelog
+    if [[ "$output_type" == "html" ]]; then
+        echo "</table>" >>$changelog_out
+    fi
+    mv $changelog_prefix $CHANGELOG_OUT
+    echo -e "\nout: $CHANGELOG_OUT/$changelog_out"
+    [ -f $temp_file ] && rm $temp_file
+    kill $pid > /dev/null 2>&1 && printf '\rDone!\n'
+    return 0
+}
+function dit-tools {
+    option_check $arg2
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python3.8 /usr/bin/python
+    scripts_path="/mnt/e/skull/scripts"
+    case $arg2 in
+        map)
+            map
+            ;;
+        display)
+            display-wearable
+            ;;
+        crc)
+            cp $scripts_path/gen_crc32.py .
+            python gen_crc32.py $arg3
+            rm gen_crc32.py
+            ;;
+        owner)
+            changelog_find_owner
+            return $?
+            ;;
+        *)
+            echo -e "\n!!Please check the option parameters"
+            ;;
+    esac
+    return 0
+}
+function dit-cfg {
+    option_check $arg2
+    local reval=0
+    case $arg2 in
+        --fw-dir)
+            dircfg $arg3 $arg4
+            reval=$?
+            ;;
+        --mk-product)
+            local output_file=".$script_name/$MAKE_MENU"
+            [[ ${EXEC_PARAMS[@]} =~ '-d' ]] && rm $output_file
+            [[ ${EXEC_PARAMS[@]} =~ '-e' ]] && touch $output_file
+            [ ! -f $output_file ] && {
+                for string in "${enum_config[@]}"
+                do
+                    entry="$string 1"
+                    echo -e "$entry" >> "$output_file"
+                done
+            }
+            ;;
+        --signature)
+            [[ $last_cmd = '-s' ]] && {
+                cat $HOME/.$script_name/signature.path
+                return 0
+            }
+            read -p "Enter your signature path: " signature_path
+            [[ ! -d $signature_path ]] && {
+                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                [[ $answer == 'Y' ]] && {
+                    mkdir $signature_path
+                    echo "Please move the file sign.pem to the path : " $signature_path
+                } || {
+                    unset signature_path
+                    return 1
+                }
+            }
+            echo $signature_path"/sign.pem" >$HOME/.$script_name/signature.path
+            ;;
+        *)
+            echo -e "\n!!Please check the option parameters: [$1]"
+            ;;
+    esac
+    return $reval
+}
+function dit-code {
+    [[ ! $arg2 || ! -d $arg2 ]] && echo "Please check the code directory!" && return -1
+    [ $arg3 ] && {
+        [ ! -d $arg3 ] && {
+            echo "The entered storage path does not exist!"
+            read -p "Create a directory Y/N?: " answer
+            [ $answer = 'Y' ] && mkdir -p $arg3
+        }
+        [ -d $arg3 ] && code_destination_path=$arg3
+    }
+    local read=$(date +"%m%d")
+    [ -d ${arg2}_$read ] && rm -rf ${arg2}_$read
+    mkdir ${arg2}_$read
+code_dir=(
+3rdparty
+application
+components
+core
+deprecated
+drivers
+framework
+hmalgo
+packages
+platform
+ui
+uiframework
+)
+    echo "working..."
+    for ((index=0; index<${#code_dir[@]}; index++))
+    do
+        rsync -r --info=progress2 $arg2/${code_dir[$index]} ${arg2}_$read
+    done
+    echo "Clipping..."
+    find ${arg2}_$read -name .git -type d |xargs rm -rf
+    find ${arg2}_$read -name prototype -type d |xargs rm -rf
+    find ${arg2}_$read/ui -name js_* |xargs rm -rf
+    find ${arg2}_$read/ui -name *.png |xargs rm -rf
+    find ${arg2}_$read -name *.a -o -name *.bin -o -name *.html -o -name *.txt -o -name *.js |xargs rm -rf
+    tar czvf ${arg2}_$read.tar.gz ./${arg2}_$read
+    rm -rf ${arg2}_$read
+    [ ! $code_destination_path ] && {
+        read -p "Enter code migration directory(Press Enter to skip): " move_dir
+        [ ! $move_dir ] && {
+            parse_dirctory
+            move_dir=$read_dir
+        }
+        [ ! -d $move_dir ] && {
+            echo "You entered storage path does not exist!"
+            read -p "Create a directory Y/N?: " answer
+            [ $answer = 'Y' ] && mkdir -p $move_dir
+            while :
+            do
+                [ ! -d $move_dir ] && read -p "enter again: " code_dir
+                [ ! $move_dir ] && return 1
+                [ -d $move_dir ] && break
+            done
+        }
+        [ -d $move_dir ] && code_destination_path=$move_dir
+    }
+    [ -d $code_destination_path ] && {
+        [ -f $code_destination_path/${arg2}_$read.tar.gz ] && rm -rf $code_destination_path/${arg2}_$read.tar.gz
+        mv ${arg2}_$read.tar.gz $code_destination_path/${arg2}.tar.gz
+        read -p "Unzip the code package Y/N?: " answer
+        [ $answer = 'Y' ] && {
+            cd $code_destination_path
+            tar xvf ${arg2}.tar.gz
+        }
+    }
+    return 0
+}
+export script_exe_path
+function dit-hello {
+    local error=0
+    while :
+    do
+        [[ -n $gerrit_name || -n $gerrit_service ]] && {
+            if ssh -p 29418 $gerrit_name@$gerrit_service 2>&1 |grep "Welcome to Gerrit Code Review" >/dev/null; then
+                ssh -p 29418 $gerrit_name@$gerrit_service 2>&1 |grep Hi
+                break
+            else
+                error=1
+                echo -e "\e[43m" "Hi buddy, there may be a mistake: " $gerrit_name $gerrit_service "\e[0m"
+            fi
+        }
+        read -p "! Tell me gerrit-service name (xxx in gerrit.xxx.com): " gerrit_service
+        gerrit_service="gerrit."$gerrit_service".com"
+        if [ $error = 0 ]; then
+            gerrit_name=$(wslvar USERNAME)
+        else
+            read -p "! Tell me your name (on Gerrit): " gerrit_name
+            [ -z $gerrit_name ] && gerrit_name=$(wslvar USERNAME)
+        fi
+    done
+    echo "working..."
+    echo $gerrit_name >user
+    sudo mv user $CFG_IN_DIR
+    echo $gerrit_service >gerrit
+    sudo mv gerrit $CFG_IN_DIR/
+    sed -i 's/^GERRIT_USER=.*/GERRIT_USER='$gerrit_name'/' $script_name_with_path
+    sed -i 's/^GERRIT_HOST=.*/GERRIT_HOST='$gerrit_service'/' $script_name_with_path
+    env_name=$HOME"/.bashrc"
+    script_exe_path=$HOME/.$script_name
+    [ ! -f $env_name ] && echo "Create ENV file!" && touch $env_name
+    [ -d $script_exe_path ] && rm -rf $script_exe_path
+    mkdir $script_exe_path
+    add_env_path="export PATH=\"$script_exe_path:\$PATH\""
+    escape_str=`echo $add_env_path |sed 's#\/#\\\/#g'`
+    sed -i '/'^"$escape_str"$'/d' $env_name
+    echo $add_env_path >>$env_name
+    cp $script $script_exe_path
+    $script comple -p $HOME -w
+    dircfg -p $CFG_IN_DIR
+    echo "/mnt/d/work/sign/sign.pem" >$script_exe_path/signature.path
+    return 0
+}
+function get_script_path {
+    spin &
+    pid=$!
+    self_path=`find /home -iname ${script_name##*/}`
+    kill $pid >/dev/null 2>&1
+    [ $(echo $self_path |awk '{print NF}') -gt 1 ] && echo "!!!路径不唯一，请检查:" && echo "$self_path" && exit 1
+    comple_path=${self_path%/*}
+}
+function dit-comple {
+    option_check $arg2
+    comple_dir=".$script_name"
+    comple_file=$script_name-completion.bash
+    [[ $arg2 = '-p' ]] && {
+        [ ! -d $arg3 ] && echo "Please ensure that the path already exists!" && exit 1
+        comple_path=$arg3
+    } || {
+        comple_path=$script_path
+    }
+    [[ ${EXEC_PARAMS[@]} =~ '-w' ]] && {
+        add_env_path="source $comple_path/.$script_name/$comple_file"
+        escape_str=`echo $add_env_path |sed 's#\/#\\\/#g'`
+        sed -i '/'^"$escape_str"$'/d' ~/.bashrc
+        echo $add_env_path >> ~/.bashrc && source ~/.bashrc
+    }
+    cat > $comple_path/.$script_name/$comple_file <<EOF
+#/usr/bin/env bash
+#@create:$(date) by skull
+${script_name}_path=$script_exe_path/$script_name
+function define_complete {
+    arg=''
+    COMPREPLY=()
+    case \$COMP_CWORD in
+        1)
+        arg=\$(grep -w ^"usage: \\\$script_name" \${${script_name}_path} |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+        ;;
+        *)
+        if [[ \$COMP_CWORD == 2 ]]; then
+            arg=\$(grep -w "^\\\$script_name \${COMP_WORDS[COMP_CWORD - 1]}" \${${script_name}_path} |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+        elif [[ "\${COMP_WORDS[COMP_CWORD]}" =~ "-" ]]; then
+            option="\${COMP_WORDS[1]}"
+            main_option="\${COMP_WORDS[2]}"
+            start_line=\$(grep -nw "^\\\$script_name \$option" \${${script_name}_path} |head -n 1 |cut -d: -f1 |xargs)
+            main_option_start_line=\$(tail -n +"\$start_line" \${${script_name}_path} |grep  -nwE "^[[:space:]]{4}\$main_option" |head -n 1 |cut -d: -f1 |xargs)
+            line_number=\$((start_line + main_option_start_line - 1))
+            arg=\$(tail -n +"\$line_number" \${${script_name}_path} | awk -v main_option="\$main_option" '
+                /^[ ]{4}[^[:space:]]/ {
+                    if (\$1 == main_option) {
+                        current_option = \$1
+                        suboptions[current_option] = ""
+                    }
+                }
+                /^\\s{8}-[a-zA-Z0-9]/ || /^\\s{8}--/ {
+                    if (current_option != "") {
+                        suboptions[current_option] = suboptions[current_option] " " \$1
+                    }
+                }
+                /^^[ ]{4}[^[:space:]]/ && \$1 != main_option {
+                    exit
+                }
+                END {
+                    result = ""
+                    for (option in suboptions) {
+                        result = result suboptions[option] "\n"
+                    }
+                    print result
+                }')
+        fi
+        if [[ ! "\$arg" =~ "\${COMP_WORDS[COMP_CWORD]}" ]] ;then
+            arg=''
+        fi
+        if [[ -z "\$arg" ]]; then
+            if [[ -d "\${COMP_WORDS[COMP_CWORD - 1]}" ]]; then
+                arg=\$(la "\${COMP_WORDS[COMP_CWORD - 1]}")
+            else
+                arg=\$(la)
+            fi
+        fi
+        ;;
+    esac
+    COMPREPLY=(\$(compgen -W "\$arg" -- \${COMP_WORDS[COMP_CWORD]}))
+}
+complete -F define_complete $script_name
+EOF
+    [ $? = 0 ] && echo -e "\n\e[32mThe completion file is created successfully!\e[0m"
+    [[ ${EXEC_PARAMS[@]} =~ '-w' ]] && {
+        chmod 777 $comple_path/.$script_name/$comple_file
+        echo -e "Please execute \e[43msource ~/.bashrc\e[0m"
+    }
+    return 0
+}
+function dit-git {
+    readarray -t git_repo_dir < <(find . -type d -name ".git" | xargs -I {} dirname {})
+    for dir in "${git_repo_dir[@]}"; do
+        echo -e "-- project  $dir\r\n"
+        cd $dir
+        git ${@:2}
+        echo -e "\r\n"
+        cd - >/dev/null
+    done
+    return 0
+}
+UPDATE_URL="https://raw.githubusercontent.com/skullboyer/dit/main/release_dit"
+VERSION_URL="https://raw.githubusercontent.com/skullboyer/dit/main/version.txt"
+CURRENT_VERSION=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
+function dit-update {
+    echo "Checking for updates..."
+    LATEST_VERSION=$(curl -s "$VERSION_URL")
+    [ $last_cmd = '?' ] && echo "new: "$LATEST_VERSION
+    [ $last_cmd = '?' ] && echo "now: "$CURRENT_VERSION
+    if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+        read -p "New version available: updated? [Y/n]: " input
+        [[ $input != 'Y' ]] && return 1
+        echo "Updating..."
+        curl -s -o "doit.tmp" "$UPDATE_URL"
+        if [ $? -eq 0 ]; then
+            mv "doit.tmp" ~/.$script_name/$script_name
+            chmod +x ~/.$script_name/$script_name
+            echo "Update successful. Please re-run the script."
+            return 0
+        else
+            echo "Failed to download the update."
+            rm -f "doit.tmp"
+            return -1
+        fi
+    else
+        echo "Already up-to-date."
+    fi
+}
+function cmd_check {
+    [ ! -d .$script_name ] && mkdir .$script_name
+    [[ ! $do_cmd ]] && {
+        echo -e "\a\n!!! Please enter the correct command."
+        exit 1
+    } || {
+        [ $do_cmd = "help" ] && help_info && exit 0
+        [[ ${EXEC_PARAMS[@]} =~ 'help' ]] && sub_help $do_cmd && exit 0
+    }
+    arg=$(grep -n ^"usage: \$script_name" $script_name_with_path | grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+    result=$(echo $arg |grep -w $do_cmd)
+    [[ ! $result && ! ${command_whitelist[@]} =~ $do_cmd ]] && {
+        echo -e "\a\e[1;31m\n OH SHIT \n"
+        exit -1
+    }
+}
+function BEGIN {
+    sudo rm -rf /usr/bin/python
+    sudo ln -s /usr/bin/python2.7 /usr/bin/python
+    handle_history=$current_path/.$script_name/$HANDLE_HISTORY
+    [ ! -d $current_path/.$script_name ] && mkdir $current_path/.$script_name
+    [ ! -f $handle_history ] && touch $handle_history
+    handle_recorder_mode=$(tail -n 1 $handle_history)
+    case $handle_recorder_mode in
+        LIFO)
+            local temp_file="$(mktemp)"
+            echo $(date)" : \$$_EXEC_PARAMS " >$temp_file
+            cat $current_path/.$script_name/$HANDLE_HISTORY >>$temp_file
+            mv $temp_file $current_path/.$script_name/$HANDLE_HISTORY
+            ;;
+        FIFO)
+            echo $(date)" : \$${EXEC_PARAMS[@]} " >>$handle_history
+            ;;
+        *)
+            echo $(date)" : \$$_EXEC_PARAMS " >>$handle_history
+            ;;
+    esac
+    update_code_info
+    echo "Start @"$(date)
+    begin_time=$(date +%s.%3N)
+}
+function END {
+    local reval=$?
+    end_time=$(date +%s.%3N)
+    execution_time=$(echo "$end_time - $begin_time" |bc)
+    execution_times=$(echo "$execution_time" | cut -d. -f1)
+    hours=$((execution_times / 3600))
+    minutes=$((execution_times % 3600 / 60))
+    seconds=$((execution_times % 60))
+    milliseconds=$(echo "$execution_time" | cut -d. -f2 | sed 's/^0*//')
+    milliseconds=$(printf "%03d" "$milliseconds")
+    echo -e "\nDONE! "$(date) && echo "Elapsed Time: $hours:$minutes:$seconds.$milliseconds"
+    local boundary=200
+    [ $reval -eq 0 ] && {
+        (echo -e "\n\e[42mSuccess!\e[0m"; prompt_tone 3 &)
+    } || {
+        [ $reval -lt $boundary ] && {
+            (echo -e "\n\e[43mWarning!\e[0m"; prompt_tone 3 &)
+        } || {
+            [ $reval -gt $boundary ] && (echo -e "\n\e[41mERROR!\e[0m"; prompt_tone -1 &)
+        }
+    }
+    exit 0
+}
+function main {
+    BEGIN
+    cmd_check
+    $script_name-$do_cmd $@
+    END
+}
+main $@
