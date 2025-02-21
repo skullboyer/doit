@@ -2581,7 +2581,7 @@ function deduplicate_changelog_process {
     return 0
 }
 module_hit_table=("sport")
-sport_module=("framework/engine/sportEngine/" "packages/apps/sports" "packages/services/sport" "ui/Sports" "ui/SportRecord" "ui/SportSecondary" "ui/SportStatus")
+sport_module=("framework/engine/sportEngine" "packages/apps/sports" "packages/services/sport" "ui/Sports" "ui/SportRecord" "ui/SportSecondary" "ui/SportStatus")
 function changelog_find_owner {
     local counter=1
     local sub_counter=1
