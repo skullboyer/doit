@@ -1,16 +1,16 @@
 #!/usr/bin/bash
-#@create:Mon Jun  9 10:38:04 CST 2025 by skull  ver:25.6.9.10.38
+#@create:Thu Jul 10 13:50:33 CST 2025 by skull  ver:25.7.10.13.50
 # Copyright © 2024 <copyright skull.gu@gmail.com>
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 # and associated documentation files (the “Software”), to deal in the Software without
 # restriction, including without limitation the rights to use, copy, modify, merge, publish,
 # distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
 # Software is furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all copies or
 # substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
 # BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 # NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
@@ -18,6 +18,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 set +e
+
+echo_c() {
+    local color="$1"
+    local text="$2"
+
+    case "$color" in
+        -bk|black)  color_code="30" ;;
+        -r|red)     color_code="31" ;;
+        -g|green)   color_code="32" ;;
+        -y|yellow)  color_code="33" ;;
+        -b|blue)    color_code="34" ;;
+        -p|purple)  color_code="35" ;; 
+        -c|cyan)    color_code="36" ;; 
+        -w|white)   color_code="37" ;;
+        *)          color_code="39" ;; 
+    esac
+
+    echo -e "\033[1;${color_code}m${text}\033[0m"
+}
 
 error_handler() {
 
@@ -46,7 +65,7 @@ cat <<EOFHELP
 ** 如果是第一次使用，请在本文件所在目录使用命令 './dit hello，根据提示操作即可 ©skull  **
 *****************************************************************************************
 
-usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
+usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
 
 初始化代码仓库
 $script_name init {branch_name} {manifest_xml}
@@ -57,8 +76,9 @@ $script_name init {branch_name} {manifest_xml}
 $script_name sync [--depth] [--rebase]
     --depth             同步代码前净化代码仓(包括删除未跟踪内容)，后跟数字为回滚深度
         [xml]               manifest仓处理
+        [all]               回退所有仓，否则仅回退CP过的代码仓
     --rebase            在当前节点下同步代码附带变基本地提交
-    tips:               缺省参数则强制同步远端而丢弃本地
+    tips:               缺省参数则仅回退不干净的仓，并更新所有仓
 
 xml操作
 $script_name xml [-s] [-g] [-d]
@@ -149,17 +169,17 @@ $script_name stash [-a] [-d] [-ad] [-v] [-vv] [-av] [-m]
     tips:               上述选项之后可加comment来划定范围，执行结果写入文件$REPO_STASH，缺省则查看最近一周内暂存
 
 查询代码仓日志信息
-$script_name query [-f] [-u] [-m] [-p] [--push]
+$script_name query [-f] [-p] [--depth] [--author] [--message] [--push]
     -f  find string     查询关键字符串的修改历史，结果写入query_result.txt
         {string}            格式：-f "string"，缺省仓路径则所有仓查找
         {repo-path}         格式：-f "string" [repo-path]，指定仓查找
     -p  push            检查仓内未push的提交，查询结果可见$QUERY_LOG
         --keep              续写多个关键字的未push查询结果
-        {key-word}      可跟仓路径关键字查询，特殊关键字'all'为检查所有仓，缺省则默认是'sport'，必须作为最后参数
-    -u  user            指定代码作者或提交者
-        {depth}             最近几天，默认深度7天
-    -m  message         指定提交时的描述信息
-        {depth}             默认深度7笔
+        --branch            检查在指定分支上未push的提交
+        --key-word          可跟仓路径关键字查询，特殊关键字'all'为检查所有仓，缺省则默认是'sport'，必须作为最后参数
+    --depth             指定查询深度，--author 最近几天 默认深度7天，--message 最近几笔 默认深度7笔
+    --author            指定代码作者或提交者
+    --message           指定提交时的描述信息
     --push              推送未push提交到远端仓库，基于-p选项的查询结果，亦可随-p选项一齐使用
     tips:               缺省所有参数（可指定深度）则查询自己最近一周的提交，查询结果写入文件$REPO_LOG
 
@@ -170,13 +190,12 @@ $script_name tiny [-p] [-t]
     tips:               项目生成的升级包与bak/[product]文件夹中的升级包做差分包存至目录bak/[product]/diff，同时将上传至桌面文件夹[product]/tiny
 
 代码仓分支操作
-$script_name branch [-v] [-n] [-x] [-d]
+$script_name branch [-v] [-n] [-x] [-d] [-s]
     -v  view            查看指定分支存在的代码仓
     -n  exclude         查看指定分支不存在的代码仓
     -x  active          查看指定分支激活的代码仓
     -d  delete          删除指定分支
-    tips:               上述选项后跟分支名，结果存入branch.temp
-$script_name branch [-s] {target_branch} {multi_branch}
+    tips:               上述选项后跟分支名，结果存入branch.tmp
     -s  switch          切换分支
         {target_branch}     仅携带这1个参数，在指定仓中切换目标分支
         {multi_branch}      多变分支名，--f选项时做远端分支，--d选项时做待删除分支，缺省(--f、--d)则表示在指定仓中创建分支，指定仓来自上条branch命令
@@ -187,8 +206,8 @@ $script_name branch [-s] {target_branch} {multi_branch}
 同步多笔提交
 $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--diff]
     -m                  支持同步的提交信息change-number、change-id、commit-hash、topic、hashtag
-                            缺省则只同步状态为NEW的提交
-        [check]             对于非NEW状态的提交进行选择，提交状态：ABANDONED、MERGED、NEW
+                            缺省则对非NEW状态的提交进行选择，提交状态：ABANDONED、MERGED、NEW
+        --force             强制同步指定的所有提交
         [counter]           统计代码的修改行数，不应用修改
     --undo              撤销同步的修改，缺省参数撤销的是最近一次同步的提交
         [assign]            撤销指定的同步提交，支持commit-id、change-number、change-id、topic、hashtag
@@ -202,6 +221,7 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--diff]
     --fail              检查同步失败的提交
     --abort             丢弃同步失败的提交
     --merge             解决完同步的冲突后，完成提交
+        --no-push           只解冲突不push
     --diff              以check为基准，查看修改明细，结果写入cp_check.diff
     tips:               topic对应的提交信息见记录topic_packet.txt，同步过程记录见topic_log.txt
 
@@ -213,6 +233,10 @@ $script_name commit [-m] [--log]
         {topic}             归集多笔提交的标记，非必要
     --log               查询代码改动仓库提交log，后跟查询深度
     tips:               缺省选项参数可在后面输入，执行前须执行diff命令，支持各提交自定义分支、各提交文件选择、是否提交及跳过
+
+推送提交
+$script_name push [--depend]
+    --depend            指定推送提交的依赖文件
 
 工具集合
 $script_name tools [map] [crc] [display] [owner] [commit]
@@ -249,7 +273,7 @@ $script_name tools [map] [crc] [display] [owner] [commit]
         --dedup             去除cherry-pick的提交
 
 创建配置文件
-$script_name cfg [--fw-dir] [--mk-product] [--signature] [--history]
+$script_name cfg [--fw-dir] [--mk-product] [--signature] [--history] [--commit-editor]
     --fw-dir            配置烧写、升级固件存放目录
         -s  show            展示当前配置的路径
         -w  write           修改存储路径
@@ -260,6 +284,7 @@ $script_name cfg [--fw-dir] [--mk-product] [--signature] [--history]
     --signature         创建签名存放路径
         -s  show            展示当前配置的路径
     --history           创建操作历史文件配置
+    --commit-editor     创建提交信息编辑器方式
     tips:               按需修改即可
 
 进行命令补全设置
@@ -285,8 +310,10 @@ $script_name git {arg}
     tips:               主要用在未被repo管控的散列代码仓使用git
 
 更新脚本
-$script_name update [-g]
+$script_name update [-g] [-b]
     -g  generate        准备本地更新文件
+        --force             配置为强制升级
+    -b  backend         后台更新，适合周期性检查
 
 EOFHELP
 }
@@ -661,16 +688,16 @@ git_fallback() {
     repo sync
 }
 grep_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/branch.temp
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/branch.tmp
 }
 grep_active_branch() {
-    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/branch.temp
+    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/branch.tmp
 }
 grep_not_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/branch.temp
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/branch.tmp
 }
 delete_branch() {
-    repo forall -p -c 'git branch -D '$1'' |tee .$script_name/branch.temp
+    repo forall -p -c 'git branch -D '$1'' |tee .$script_name/branch.tmp
 }
 switch_branch() {
     [ -z $1 ] && echo "Please input correct arguments!" && exit -1
@@ -678,10 +705,10 @@ switch_branch() {
         repo forall -c git checkout -b $1 origin/$2
         return
     }
-    [[ -f dir.branch.temp ]] || {
-        [[ ! -f branch.temp ]] && echo "Make sure the target branch file exists!" && exit -1
-        grep project branch.temp > .$script_name/project.branch.temp
-        awk '{$1="";print $0}' project.branch.temp > dir.branch.temp
+    [[ -f dir.branch.tmp ]] || {
+        [[ ! -f branch.tmp ]] && echo "Make sure the target branch file exists!" && exit -1
+        grep project branch.tmp > .$script_name/project.branch.tmp
+        awk '{$1="";print $0}' project.branch.tmp > dir.branch.tmp
     }
     while read line
     do
@@ -697,8 +724,7 @@ switch_branch() {
         }
         echo -e ": " $line "\n"
         cd - >/dev/null
-    done < dir.branch.temp
-    [ $last_cmd = '?' ] || rm *.branch.temp
+    done < dir.branch.tmp
 }
 _parse_dirctory() {
     dirconfig=`find /home ! -path '/home/skull/work/scripts/*' -iname $dir_cfg`
@@ -766,8 +792,7 @@ copy_firmware() {
             mkdir $product_ota_dir/$last_cmd
             echo "copying..."
             start_spin_bar
-            cp $source_dir/watch@*_fw_only_sign.zip $product_ota_dir/$last_cmd
-            cp $source_dir/watch@*_ota_sign.zip $product_ota_dir/$last_cmd
+            cp $source_dir/watch@*_sign.zip $product_ota_dir/$last_cmd
             cp $source_dir/watch@*.elf $product_ota_dir/$last_cmd
             rm $product_ota_dir/$last_cmd/watch@*.*.elf
             cp $source_dir/watch@*.map $product_ota_dir/$last_cmd
@@ -1004,8 +1029,16 @@ get_current_branch() {
             done
         }
     }
-    [ -z "$branch" ] && return 1
-    echo "$branch"
+    [ -n "$branch" ] && {
+        local br_num=$(echo "$branch" |grep origin |wc -l)
+        [ $br_num -eq 1 ] && {
+            branch=${branch#*/}
+            echo "$branch"
+            return
+        }
+        echo "Maybe it helps: $branch"
+    }
+    return 1
 }
 update_code_info() {
     if is_valid_cmd 'init'; then
@@ -1019,9 +1052,13 @@ update_code_info() {
     elif is_valid_cmd 'sync'; then
         echo $(date) >.$script_name/$CODE_INFO
         cd .repo/manifests
-        local branch=$(get_current_branch)
+        if ret=$(get_current_branch); then
+            branch="$ret"
+        else
+            echo "$ret"
+            branch="unKnown"
+        fi
         cd - >/dev/null
-        [[ -z $branch ]] && branch="unKnown"
         echo "branch: "$branch >>.$script_name/$CODE_INFO
         xml=$(ls -l .repo |grep manifest.xml |cut -d '/' -f2)
         [[ -z $xml ]] && xml="unKnown"
@@ -1048,7 +1085,7 @@ get_option_index_and_value() {
                     index=$((i + 1))
                     ((i++)) 
                 else
-                    echo "Error: Option $option requires a non-empty value." >&2
+                    echo_c yellow "Warning: Option $option requires a non-empty value." >&2
                     return 1
                 fi
                 ;;
@@ -1153,7 +1190,10 @@ function dit-init {
     xml_name=$arg3
     [ ! $branch_name ] && branch_name=master
     [ ! $xml_name ] && xml_name=huamiOS
+    git clone https://gerrit.googlesource.com/git-repo .repo/repo
+    echo_c green "init..."
     repo init --repo-url=ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/git-repo -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
+    echo_c green "sync..."
     repo sync -j16
     [ $? != 0 ] && return -1
     echo -e "\n\e[42mOver!\e[0m\n"
@@ -1281,7 +1321,27 @@ function dit-sync {
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
         [[ ${EXEC_PARAMS[@]} =~ 'xml' ]] && git -C .repo/manifests reset --hard HEAD~$depth
-        [[ $depth =~ ^[0-9]+$ ]] && git_fallback $depth
+        [ $last_cmd = 'all' ] && [[ $depth =~ ^[0-9]+$ ]] && git_fallback $depth && return
+        local sync_file=$(mktemp)
+        if [ -f $DOT_DIT/$CP_CHECK ]; then
+            cat $DOT_DIT/$CP_CHECK |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
+            [[ -z $depth ]] && depth=$(grep -o 'HEAD@{[0-9]*}' $DOT_DIT/$CP_CHECK |sed -E 's/HEAD@\{([0-9]*)\}/\1/' |sort -n |tail -1)
+            echo $depth && return
+        elif [ -f $DOT_DIT/$QUERY_LOG ]; then
+            cat $DOT_DIT/$QUERY_LOG |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
+        else
+            echo_c red "!! I think you should execute the cp --check command or the query command"
+            return 1
+        fi
+        [ -s $sync_file ] && {
+            echo_c green " rollback...."
+            while IFS= read -r line; do
+                git -C $line reset --hard HEAD~$depth
+                git -C $line clean -fd
+            done <$sync_file
+            repo sync -d --force-sync -j16
+        }
+        rm $sync_file
     elif [[ $arg2 = '--rebase' ]]; then
         repo forall -c git pull --rebase
     else
@@ -1289,17 +1349,21 @@ function dit-sync {
         export temp_file 
         repo forall -p -c '
         [ -n "$(git status --porcelain)" ] && {
-            echo "❌ 仓库 [$REPO_PATH] 存在未提交或未跟踪的文件！" |tee -a $temp_file
+            echo "❌ 仓库 [$REPO_PATH] 存在未提交或未跟踪的文件！"
+            echo $REPO_PATH >>$temp_file
             git status -s
         }'
         [ -s $temp_file ] && {
-            rm $temp_file
             echo -e "\n"
             read -p "⚠️ 要丢弃这些文件么[Y/n]: " input
-            [[ "$input" != 'Y' ]] && return 1
+            [[ "$input" != 'Y' ]] && rm $temp_file && return 1
+            while IFS= read -r line; do
+                git -C $line reset --hard HEAD
+                git -C $line clean -fd
+            done <$temp_file
+            rm $temp_file
         }
-        repo forall -c 'git reset --hard HEAD; git clean -fd'
-        repo sync -d --force-sync
+        repo sync -d --force-sync -j16
     fi
     [ -f $DOT_DIT/$CP_HISTORY_LOG ] && rm $DOT_DIT/$CP_HISTORY_LOG
     return 0
@@ -1364,6 +1428,7 @@ function dit-make {
             deconfig=`find ../ -iname $config_select`
             local temp=$(mktemp)
             cp $deconfig $temp
+            local deconfig_version=$(grep BOARD_FIRMWARE_VERSION $deconfig)
             sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$version'"' $deconfig
             make $config_select BUILD_TYPE=$debug_release BUILD_FW_VER=$version
             cd - >/dev/null
@@ -1378,11 +1443,14 @@ function dit-make {
         [[ ${EXEC_PARAMS[@]} =~ '-a' ]] && {
             echo "config_select: "$config_select
             [[ $config_select =~ "mhs003" ]] && {
+                local tmp="${config_select#mhs003_}"
+                local product="${tmp%_defconfig}"
                 echo "other core: build mhs003" >>../$OTA_VERSION
                 [ -d out_hub ] && rm out_hub -rf
-                make mhs003_matterhorn_sensorhub_defconfig APPDIR=out_hub
+                make mhs003_${product}_sensorhub_defconfig APPDIR=out_hub
                 make BUILD_DIR=out_hub APPDIR=out_hub
-                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003.bin ../platform/board/mhs003/products/matterhorn/sensorhub
+                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003.bin ../platform/board/mhs003/products/${product}/sensorhub
+                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003_sign.bin ../platform/board/mhs003/products/${product}/sensorhub
             }
         }
         if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
@@ -1401,7 +1469,7 @@ function dit-make {
             fi
         else
             mv $temp $deconfig
-            sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="1.0.0"' $deconfig
+            sed -i '/BOARD_FIRMWARE_VERSION=/c'"$deconfig_version"'' $deconfig
         fi
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
     }
@@ -1533,14 +1601,14 @@ function apply_patch {
         [[ -f $OPTION_VALUE/.$script_name/$REPO_DIFF ]] && cp $OPTION_VALUE/.$script_name/$REPO_DIFF .$script_name/$REPO_PATCH
     }
     [[ ! -f .$script_name/$REPO_PATCH && ! -f .$script_name/$REPO_DIFF ]] && echo -e "\n!!Please exec diff command" && return 1
-    grep -n $split_line .$script_name/$REPO_PATCH | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_PATCH >.$script_name/patch_project.temp
-    grep -w "^project" .$script_name/patch_project.temp >.$script_name/patch_path_project.temp
-    [ ! -s .$script_name/patch_path_project.temp ] && echo "** Nothing To Patch" && rm .$script_name/patch*.temp && return 0
-    patch_code_path=`awk -F " " '{print $2}' .$script_name/patch_path_project.temp`
+    grep -n $split_line .$script_name/$REPO_PATCH | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_PATCH >.$script_name/patch_project.tmp
+    grep -w "^project" .$script_name/patch_project.tmp >.$script_name/patch_path_project.tmp
+    [ ! -s .$script_name/patch_path_project.tmp ] && echo "** Nothing To Patch" && rm .$script_name/patch*.tmp && return 0
+    patch_code_path=`awk -F " " '{print $2}' .$script_name/patch_path_project.tmp`
     [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "patch_code_path $patch_code_path"
-    grep -n $split_line .$script_name/$REPO_PATCH |awk -F ":" '{print $1}' |xargs -I{} sed -n '{},$p' .$script_name/$REPO_PATCH >.$script_name/patch_content.temp
-    [ ! -s .$script_name/patch_content.temp ] && echo "** Nothing To Patch Content" && rm .$script_name/patch*.temp && return 0
-    patch_content_number=$(grep -nw "^project" .$script_name/patch_content.temp |cut -d ':' -f1)
+    grep -n $split_line .$script_name/$REPO_PATCH |awk -F ":" '{print $1}' |xargs -I{} sed -n '{},$p' .$script_name/$REPO_PATCH >.$script_name/patch_content.tmp
+    [ ! -s .$script_name/patch_content.tmp ] && echo "** Nothing To Patch Content" && rm .$script_name/patch*.tmp && return 0
+    patch_content_number=$(grep -nw "^project" .$script_name/patch_content.tmp |cut -d ':' -f1)
     readarray -t patch_content_number <<<$patch_content_number
     [[ $last_cmd = '@' ]] && {
         [[ -d .$script_name/patch ]] && rm -rf .$script_name/patch
@@ -1554,11 +1622,11 @@ function apply_patch {
         if [[ $index -lt $(( ${#patch_code_path[@]} - 1 )) ]]; then
             end_number=$(( ${patch_content_number[$((index + 1))]} -1 ))
             [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "* end_number $end_number"
-            sed -n "${start_number},${end_number}p" .$script_name/patch_content.temp >.$script_name/temp.patch
-            [[ $last_cmd = '@' ]] && sed -n "${start_number},${end_number}p" .$script_name/patch_content.temp >.$script_name/patch/$index.patch
+            sed -n "${start_number},${end_number}p" .$script_name/patch_content.tmp >.$script_name/temp.patch
+            [[ $last_cmd = '@' ]] && sed -n "${start_number},${end_number}p" .$script_name/patch_content.tmp >.$script_name/patch/$index.patch
         else
-            sed -n "${start_number},\$p" .$script_name/patch_content.temp >.$script_name/temp.patch
-            [[ $last_cmd = '@' ]] && sed -n "${start_number},\$p" .$script_name/patch_content.temp >.$script_name/patch/$index.patch
+            sed -n "${start_number},\$p" .$script_name/patch_content.tmp >.$script_name/temp.patch
+            [[ $last_cmd = '@' ]] && sed -n "${start_number},\$p" .$script_name/patch_content.tmp >.$script_name/patch/$index.patch
         fi
         cd ${patch_code_path[$index]}
         [[ $last_cmd = '@' ]] && git apply --check $DOT_DIT/patch/$index.patch
@@ -1570,7 +1638,6 @@ function apply_patch {
         rm -rf .$script_name/patch
     }
     rm .$script_name/temp.patch
-    rm .$script_name/patch*.temp
     return 0
 }
 function dit-diff {
@@ -1687,7 +1754,7 @@ function dit-diff {
             if pwd |grep -iq "'"$path_keyword"'"; then
                 changed=$(git diff --name-only |grep -v "'"$file_exclude"'")
                 if [ -n "$changed" ]; then
-                    git status --porcelain
+                    git status --porcelain |nl
                 fi
             fi
         ' |tee -a .$script_name/$REPO_DIFF
@@ -1765,11 +1832,11 @@ function dit-commit {
     [[ $arg2 = '-m' && ! $arg3 ]] && echo -e "\e[43m\e[31m!!Please input commit branch\e[0m" && return -1
     backup_branch=$arg3
     [ ! -f .$script_name/$REPO_DIFF ] && echo -e "\n!!Please exec diff command" && return 1
-    grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF >.$script_name/commit_project.temp
-    grep -w "^project" .$script_name/commit_project.temp >.$script_name/commit_path_project.temp
-    [ ! -s .$script_name/commit_path_project.temp ] && echo "** Nothing To Submit" && rm .$script_name/commit*.temp && return 0
-    commit_code_path=`awk -F " " '{print $2}' .$script_name/commit_path_project.temp`
-    [[ $last_cmd = '?' ]] || rm .$script_name/commit*.temp
+    grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF >.$script_name/commit_project.tmp
+    grep -w "^project" .$script_name/commit_project.tmp >.$script_name/commit_path_project.tmp
+    [ ! -s .$script_name/commit_path_project.tmp ] && echo "** Nothing To Submit" && rm .$script_name/commit*.tmp && return 0
+    commit_code_path=`awk -F " " '{print $2}' .$script_name/commit_path_project.tmp`
+    [[ $last_cmd = '?' ]] || rm .$script_name/commit*.tmp
     local temp_commit_log="$DOT_DIT/temp_commit.log"
     touch $temp_commit_log
     readarray -t commit_code_path <<<$commit_code_path
@@ -1780,10 +1847,16 @@ function dit-commit {
     local bt=""
     local bk=""
 prompt="
-----------------------------------------------------------------------------------------------
- (Y)confirm commit    (M)mount commit    (N)skip commit    (C)amend commit    (B)change branch
- (A)add file          (R)exclude file    (V)view diff      (I)info check      (L)view log
- (Q)exit"
+-------------------------------------------------------------------------------------------------------
+ (Y)confirm commit     (M)mount commit    (N)skip commit          (C)amend commit      (B)change branch
+ (A)add file           (X)exclude file    (V)view diff            (I)info check        (L)view log
+ (G)new commit         (O)only commit     (R)resolve conflicts    (E)clear settings    (Q)exit"
+    declare -A prompt_array
+    while read -r part; do
+        key=$(echo "$part" | sed -E 's/^\(([A-Z])\).*/\1/')
+        val=$(echo "$part" | sed -E 's/^\([A-Z]\)[[:space:]]*(.*)/\1/')
+        prompt_array["$key"]="$val"
+    done < <(echo "$prompt" | grep -oP '\([A-Z]\)[^()]+')
     for ((index=0; index<${#commit_code_path[@]}; index++))
     do
         echo -e "\npath: "${commit_code_path[$index]}
@@ -1798,15 +1871,17 @@ prompt="
         git add -u
         git status
         branch=$arg3
+        local no_push="no"
         while true
         do
             [ ! $input ] && {
                 read -p "$(printf "%s $prompt \n\nYou Choice: ")" input
-                bk="$input"
+                bt="$input"
             }
+            echo_c blue "Operation options: [$input] ${prompt_array[$input]}"
             case $input in
                 Y|M)
-                    [ ! $branch ] && bt=$input && input=I && continue
+                    [ ! $branch ] && bk=$input && input=I && continue
                     local result=$(git branch -a| grep "remotes/origin/$branch")
                     [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
                     [[ ! $message ]] && {
@@ -1825,7 +1900,11 @@ prompt="
                     ;;
                 N)
                     echo -e "\e[43m\e[31m!!Skip this commit...\e[0m"
-                    git reset
+                    if [[ $bt = 'C' ]]; then
+                        git reset HEAD@{1}
+                    else
+                        git reset
+                    fi
                     break
                     ;;
                 C)
@@ -1833,19 +1912,23 @@ prompt="
                         read -p "> commit branch: " temp_branch
                         [ ! $temp_branch ] && git reset && break
                     else
-                        local commit_id=$(git log -1 |grep ^commit |awk -F " " '{print $2}')
-                        temp_branch=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$commit_id |grep "branch:" |awk -F " " '{print $2}')
+                        local change_id=$(git log -1 --format=%b |awk -F : '{print $2}' |xargs)
+                        temp_branch=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
                         echo "amend branch: "$temp_branch
-                        [ ! $temp_branch ] && {
-                            local change_id=$(git log -1 |grep Change-Id |awk -F " " '{print $2}')
-                            readarray -t branches < <(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
+                        local branch_num=$(echo "$temp_branch" |wc -l)
+                        [[ $branch_num -gt 1 ]] && {
+                            readarray -t branches < <(echo "$temp_branch")
                             local number=0
                             for branch in "${branches[@]}"; do
                                 echo "$number>: $branch"
                                 ((number++))
                             done
                             read -p "Please select branch: " select
-                            [[ $select =~ ^[0-9]+$ ]] && temp_branch=${branches[$select]}
+                            if [[ $select =~ ^[0-9]+$ ]]; then
+                                temp_branch=${branches[$select]}
+                            else
+                                temp_branch="$select"
+                            fi
                         }
                     fi
                     reentry="yes"
@@ -1862,7 +1945,7 @@ prompt="
                     git branch |grep detached && git branch -a |grep "\->" || git branch -vv
                     git branch -a |grep "\->"
                     read -p " new branch: " branch
-                    input=$bt && continue
+                    input=$bk && continue
                     ;;
                 A)
                     git status -s
@@ -1870,7 +1953,7 @@ prompt="
                     git add $untracked_file
                     git status
                     ;;
-                R)
+                X)
                     git status -s
                     read -p " restore file: " restore_file
                     git reset $restore_file
@@ -1880,10 +1963,13 @@ prompt="
                     git status -v
                     ;;
                 I)
-                    local branch_tips=$(get_current_branch)
-                    [ -n "$branch_tips" ] && echo "Maybe it helps: $branch_tips"
+                    if ret=$(get_current_branch); then
+                        branch="$ret"
+                    else
+                        echo "$ret"
+                    fi
                     echo " * Branch:   "$branch
-                    echo " * Message:  "$message
+                    echo " * Message:  $message"
                     echo " * Topic:    "$topic
                     echo "(If no modification is needed, press 'Enter'. To go back, input 'Q'.)"
                     read -p "> commit branch: " temp_branch
@@ -1892,14 +1978,29 @@ prompt="
                         continue
                     }
                     [[ -n $temp_branch ]] && branch=$temp_branch
-                    echo -e "\n(Please enter your commit message. Press Ctrl+D when finished.)\n> commit message: "
-                    temp_message=$(cat)
+                    local editor=$(cat $CFG_IN_DIR/commit.edit 2>/dev/null)
+                    editor=${editor:-0}
+                    case "$editor" in
+                        1)
+                            tmpfile=$(mktemp)
+                            echo -e "\nOpening vim... Please edit and save."
+                            vim "$tmpfile"
+                            temp_message=$(cat "$tmpfile")
+                            rm "$tmpfile"
+                            echo "> commit message:"
+                            echo "temp_message"
+                            ;;
+                        *)
+                            echo -e "\n> commit message (press Ctrl+D to finish):"
+                            temp_message=$(cat)
+                            ;;
+                    esac
                     [ "$temp_message" ] && message=$temp_message
                     echo -e "\n"
                     echo "(Keep, press 'Enter'. Clean, press 'Space'.)"
                     read -p "> commit topic: " temp_topic
                     [[ $temp_topic ]] && topic=$temp_topic
-                    input=$bt && continue
+                    input=$bk && continue
                     ;;
                 L)
                     local depth=1
@@ -1911,13 +2012,40 @@ prompt="
                     done
                     git log -$depth
                     ;;
+                G)
+                    [[ $bk = 'R' ]] || git commit --amend --no-edit
+                    message=$(git log -1 --format=%s)
+                    git reset HEAD^
+                    git add -u
+                    git status
+                    input="Y" && continue
+                    ;;
+                O)
+                    echo "* only commit not push"
+                    no_push="yes"
+                    ;;
+                R)
+                    git add -u
+                    git status
+                    git cherry-pick --continue
+                    ;;
+                E)
+                    echo "* clear the settings"
+                    no_push="no"
+                    ;;
                 Q)
-                    git reset
+                    if [[ $bt = 'C' ]]; then
+                        git reset HEAD@{1}
+                    else
+                        git reset
+                    fi
                     break 2 
                     ;;
                 push)
-                    local current_branch=$(get_current_branch)
-                    current_branch=${current_branch#*/}
+                    [ $no_push = "yes" ] && echo_c yellow "no push" && break
+                    if ret=$(get_current_branch); then
+                        current_branch="$ret"
+                    fi
                     [[ $current_branch != $branch ]] && {
                         echo -e "\n!Local branch is inconsistent with push branch"
                         echo "!!You'd better not do that"
@@ -1929,7 +2057,7 @@ prompt="
                         }
                     }
                     echo -e "project: "${commit_code_path[$index]} >>$temp_commit_log
-                    if [[ $bk = 'C' ]]; then
+                    if [[ $bt = 'C' ]]; then
                         echo -e "- Amend Commit""\r\n" >>$temp_commit_log
                         git push origin HEAD:refs/for/$branch 2>&1 |tee -a $temp_commit_log
                     else
@@ -1943,11 +2071,10 @@ prompt="
                     echo -e "\e[47m\e[31m!!Please check the input\e[0m"
                     ;;
             esac
+            bk=$bt
             unset input
-            unset bt
         done
-        unset input
-        unset bt
+        unset bk input
         arg3=$branch
         cd - >/dev/null
     done
@@ -1963,6 +2090,43 @@ prompt="
     }
     rm $temp_commit_log
     return 0
+}
+function dit-push {
+    [[ ${EXEC_PARAMS[@]} =~ '--depend' ]] && {
+        get_option_index_and_value --depend
+        push_file=$OPTION_VALUE
+    }
+    [[ -n "$push_file" ]] && {
+        readarray -t repo_path < <(cat .$script_name/$push_file | grep -w "^project" | awk -F " " '{print $2}')
+        local branch=master
+        for ((index=0; index<${#repo_path[@]}; index++))
+        do
+            echo -e "\n"
+            cd ${repo_path[$index]}
+            pwd
+            if ret=$(get_current_branch); then
+                current_branch="$ret"
+            else
+                echo "$ret"
+            fi
+            echo "Branch: "$current_branch
+            [ -n "$current_branch" ] && branch="$current_branch"
+            git show --stat
+            unset enter
+            read -p "$(echo -e '\nConfirm the submit on <'"$branch"'>: Y/N?\nor modify submit branch: M?')  " enter
+            [[ $enter = 'Q' || $enter = 'q' ]] && exit 0
+            [[ $enter = 'M' ]] && {
+                read -p "new branch name: " bn_enter
+                branch=$bn_enter
+                enter=Y
+            }
+            [[ $enter = 'Y' ]] && {
+                git push origin HEAD:refs/for/$branch
+            }
+            cd - >/dev/null
+        done
+        return 0
+    }
 }
 function dit-stash {
     echo $(date)" : \$$_EXEC_PARAMS" >.$script_name/$REPO_STASH
@@ -2014,7 +2178,7 @@ function dit-stash {
         }" >>.$script_name/$REPO_STASH_DIFF
     }
     [ $arg2 = '-m' ] && {
-        grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.temp
+        grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.tmp
         read -p "\$ Confirm stash above all Y/N: " anser
         [[ ! $anser || ($anser != 'N' && $anser != 'Y') ]] && echo "!!Invalid input" && return 1
         [ $anser = 'Y' ] && ansersub='Y'
@@ -2025,8 +2189,8 @@ function dit-stash {
                 [ -n "$last_cmd" ] && break
             done
         }
-        grep -w "^project" .$script_name/stash_project.temp >.$script_name/stash_path_project.temp
-        stash_code_path=`awk -F " " '{print $2}' .$script_name/stash_path_project.temp`
+        grep -w "^project" .$script_name/stash_project.tmp >.$script_name/stash_path_project.tmp
+        stash_code_path=`awk -F " " '{print $2}' .$script_name/stash_path_project.tmp`
         readarray -t stash_code_path <<<$stash_code_path
         for path in ${stash_code_path[@]}
         do
@@ -2035,39 +2199,72 @@ function dit-stash {
             [ $ansersub = 'Y' ] && git stash push -m "$last_cmd" |tee -a $DOT_DIT/$REPO_STASH
             cd - >/dev/null
         done
-        rm .$script_name/stash*.temp
         echo "Stash Complete!"
     }
     return 0
 }
 function dit-query {
     option_check $arg2
-    [[ $arg2 && $arg2 = '-p' ]] && {
+    [[ $arg2 = '-p' ]] && {
         path_keyword=sport
-        [[ $last_cmd != '-p' ]] && {
-            if [ $last_cmd = 'all' ]; then
+        [[ ${EXEC_PARAMS[@]} =~ '--key-word' ]] && {
+            get_option_index_and_value --key-word
+            if [ $OPTION_VALUE = 'all' ]; then
                 unset path_keyword
             else
-                path_keyword=$last_cmd
+                path_keyword=$OPTION_VALUE
             fi
+        }
+        [[ ${EXEC_PARAMS[@]} =~ '--branch' ]] && {
+            get_option_index_and_value --branch
+            seek_branch=$OPTION_VALUE
         }
         [ ! -f .$script_name/$QUERY_LOG ] && touch .$script_name/$QUERY_LOG
         [[ ${EXEC_PARAMS[@]} =~ '--keep' ]] || {
             [ -f .$script_name/$QUERY_LOG ] && rm .$script_name/$QUERY_LOG
             touch .$script_name/$QUERY_LOG
         }
-        keyword=commit 
-        start_spin
-        base_dir=`pwd`
-        repo forall -p -c "{
-            short_dir=\$(realpath --relative-to=\"$base_dir\" \"\$PWD\")
-            if echo \$short_dir |grep -i '"$path_keyword"' >/dev/null; then
-                commitid=\$(git log -1 |grep ^commit |awk '{print \$2}')
-                changeid=\$(git log -1 |grep Change-Id: |awk '{print \$2}')
-                push_status=\$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set \$keyword \$commitid |grep rowCount: |awk '{print \$2}')
-                [ \$push_status = 0 ] && [ \$changeid ] && echo \"** No Push: \"\$changeid && git show \$commitid --stat
-            fi
-        }" |tee -a .$script_name/$QUERY_LOG
+        if [ -n "$seek_branch" ]; then
+            start_spin
+            query_mode=change
+            base_dir=`pwd`
+            export BASE_DIR="$base_dir"
+            export PATH_KEYWORD="$path_keyword"
+            export ENV_GERRIT_USER="$GERRIT_USER"
+            export ENV_GERRIT_HOST="$GERRIT_HOST"
+            export SEEK_BRANCH="$seek_branch"
+            export QUERY_MODE="$query_mode"
+            export ENV_QUERY_LOG="$DOT_DIT/$QUERY_LOG"
+            export TMP_FILE=$(mktemp)
+            repo forall -p -c ' {
+                short_dir=$(realpath --relative-to="$BASE_DIR" "$PWD")
+                if echo "$short_dir" | grep -i "$PATH_KEYWORD" >/dev/null; then
+                    commitid=$(git log -1 --format=%H)
+                    changeid=$(git log -1 | grep Change-Id: | awk "{print \$2}")
+                    push_status=$(ssh -p 29418 "$ENV_GERRIT_USER@$ENV_GERRIT_HOST" gerrit query --current-patch-set "branch:$SEEK_BRANCH $QUERY_MODE:$changeid" | grep rowCount: | awk "{print \$2}")
+                    if [ "$push_status" = 0 ] && [ -n "$changeid" ]; then
+                        echo "\nproject $REPO_PATH \n** No Push: $changeid" >>"$TMP_FILE"
+                        git log -1 --format=%s >>"$TMP_FILE"
+                        git show "$commitid" --stat
+                    fi
+                fi
+            }' >>.$script_name/$QUERY_LOG
+            cat $TMP_FILE
+            rm $TMP_FILE
+        else
+            query_mode=commit 
+            start_spin
+            base_dir=`pwd`
+            repo forall -p -c "{
+                short_dir=\$(realpath --relative-to=\"$base_dir\" \"\$PWD\")
+                if echo \$short_dir |grep -i '"$path_keyword"' >/dev/null; then
+                    commitid=\$(git log -1 |grep ^commit |awk '{print \$2}')
+                    changeid=\$(git log -1 |grep Change-Id: |awk '{print \$2}')
+                    push_status=\$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set \$query_mode \$commitid |grep rowCount: |awk '{print \$2}')
+                    [ \$push_status = 0 ] && [ \$changeid ] && echo \"** No Push: \"\$changeid && git show \$commitid --stat
+                fi
+            }" |tee -a .$script_name/$QUERY_LOG
+        fi
         [[ ${EXEC_PARAMS[@]} =~ '--push' ]] || return 0
     }
     [[ ${EXEC_PARAMS[@]} =~ '--push' ]] && {
@@ -2084,8 +2281,11 @@ function dit-query {
             echo -e "\n"
             cd ${repo_path[$index]}
             pwd
-            local current_branch=$(get_current_branch)
-            current_branch=${current_branch#*/}
+            if ret=$(get_current_branch); then
+                current_branch="$ret"
+            else
+                echo "$ret"
+            fi
             echo "Branch: "$current_branch
             [ -n "$current_branch" ] && branch="$current_branch"
             git show ${commit_id[$index]} --stat
@@ -2157,19 +2357,20 @@ function dit-query {
         return 0
     }
     depth=7
-    if [ $# -gt 2 ]; then
-        [[ $arg2 =~ '-u' ]] && {
-            [ ! -z $arg4 ] && depth=$arg4
-            repo forall -p -c git log --author="$arg3" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
-        }
-        [[ $arg2 =~ '-m' ]] && {
-            [ -z $arg3 ] && echo "Please enter the character you want to query!" && exit -1
-            echo $last_cmd |grep [0-9] >/dev/null && depth=$last_cmd
-            repo forall -p -c "git log -$depth --oneline |grep $last_cmd" |tee .$script_name/$REPO_LOG
-        }
+    [[ ${EXEC_PARAMS[@]} =~ '--depth' ]] && {
+        get_option_index_and_value --depth
+        depth=$OPTION_VALUE
+    }
+    if [[ ${EXEC_PARAMS[@]} =~ '--author' ]]; then
+        get_option_index_and_value --author
+        author=$OPTION_VALUE
+        repo forall -p -c git log --author="$author" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+    elif [[ ${EXEC_PARAMS[@]} =~ '--message' ]]; then
+        get_option_index_and_value --message
+        message=$OPTION_VALUE
+        repo forall -p -c "git log -$depth --oneline |grep $message" |tee .$script_name/$REPO_LOG
     else
-        [ ! -z $arg2 ] && depth=$arg2
-        repo forall -p -c git log --committer="$GERRIT_USER" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+        repo forall -p -c git log --committer="$GERRIT_USER" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s %n" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
     fi
     return 0
 }
@@ -2282,7 +2483,7 @@ function dit-cp {
             echo -e "\n\n"$split_line >>.$script_name/$CP_CHECK
             for ((i=0; i<${#path_array[@]}; i++)); do
                 echo ${path_array[i]}
-                echo ${hash_array[i]} 
+                echo ${hash_array[i]}
                 cd ${path_array[i]}
                 echo -e "\nproject: "${path_array[i]} >>$DOT_DIT/$CP_CHECK
                 git show ${hash_array[i]} >>$DOT_DIT/$CP_CHECK
@@ -2311,6 +2512,7 @@ function dit-cp {
             [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && git diff
             git add -u
             git cherry-pick --continue
+            [[ ${EXEC_PARAMS[@]} =~ '--no-push' ]] && cd - >/dev/null && continue
             local change_id=$(git log -1 |grep Change-Id |awk -F " " '{print $2}')
             readarray -t branches < <(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
             local number=0
@@ -2322,8 +2524,11 @@ function dit-cp {
             [[ $select =~ ^[0-9]+$ ]] && branch=${branches[$select]}
             read -p "Confirm commit branch: $branch  [Y/N/M]: " choice
             if [[ $choice = 'Y' ]] ; then
-                local current_branch=$(get_current_branch)
-                current_branch=${current_branch#*/}
+                if ret=$(get_current_branch); then
+                    current_branch="$ret"
+                else
+                    echo "$ret"
+                fi
                 [[ $current_branch != $branch ]] && {
                     echo -e "\n!Local branch is inconsistent with push branch"
                     echo "!!You'd better not do that"
@@ -2372,7 +2577,7 @@ function dit-cp {
         [[ $arg3 = "assign" ]] && {
             [ "$last_cmd" = 'assign' ] && echo "!Seems like something is missing" && return -1
             local SSH_GET=".$script_name/cp_packet.txt"
-            local PROCESS_RESULT=".$script_name/cp_project.temp"
+            local PROCESS_RESULT=".$script_name/cp_project.tmp"
             get_option_index_and_value assign
             local ssh_token="$OPTION_VALUE"
             ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$ssh_token >$SSH_GET
@@ -2434,12 +2639,11 @@ function dit-cp {
                 cd - >/dev/null
             }
         done <.$script_name/$CP_CHECK.tmp
-        [ $last_cmd = '?' ] || rm .$script_name/$CP_CHECK.tmp >/dev/null
         return 0
     }
     [ $arg2 = "-m" ] && {
         local SSH_GET=".$script_name/cp_packet.txt"
-        local PROCESS_RESULT=".$script_name/cp_project.temp"
+        local PROCESS_RESULT=".$script_name/cp_project.tmp"
         ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$arg3 >$SSH_GET
         grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
             ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$arg3 >$SSH_GET
@@ -2470,16 +2674,16 @@ function dit-cp {
             print (NF >= 2) ? $2 : $0
         }' $PROCESS_RESULT) 
         readarray -t code_path <<<$code_path
-        grep -w "open:" $SSH_GET >.$script_name/cp_project_open.temp 
-        readarray -t commit_opens < <(awk -F ":" '{print $2}' .$script_name/cp_project_open.temp)
-        grep -w -n "status:" $SSH_GET >.$script_name/cp_project_status.temp 
-        readarray -t commit_status < <(awk -F ":" '{print $3}' .$script_name/cp_project_status.temp)
-        readarray -t commit_status_line < <(awk -F ":" '{print $1}' .$script_name/cp_project_status.temp)
-        grep -w "ref:" $SSH_GET >.$script_name/cp_project_ref.temp 
-        commit_refs=`awk -F ":" '{print $2}' .$script_name/cp_project_ref.temp`
+        grep -w "open:" $SSH_GET >.$script_name/cp_project_open.tmp 
+        readarray -t commit_opens < <(awk -F ":" '{print $2}' .$script_name/cp_project_open.tmp)
+        grep -w -n "status:" $SSH_GET >.$script_name/cp_project_status.tmp 
+        readarray -t commit_status < <(awk -F ":" '{print $3}' .$script_name/cp_project_status.tmp)
+        readarray -t commit_status_line < <(awk -F ":" '{print $1}' .$script_name/cp_project_status.tmp)
+        grep -w "ref:" $SSH_GET >.$script_name/cp_project_ref.tmp 
+        commit_refs=`awk -F ":" '{print $2}' .$script_name/cp_project_ref.tmp`
         readarray -t commit_refs <<<$commit_refs
-        grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.temp 
-        readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.temp)
+        grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.tmp 
+        readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.tmp)
         echo "$"$do_cmd" "$last_cmd"  @"$(date) >.$script_name/$CP_LOG
         local cp_num=0
         for ((index = ${#link_code_path[@]} - 1; index >= 0 ; index--))
@@ -2501,25 +2705,25 @@ function dit-cp {
                     private_status=$(echo $private |awk -F ":" '{print $2}')
                     [ $private_status = 'true' ] && {
                         echo -e "\n[$cp_num] - project: "$link" - "$refs
+                        echo "@Describe: " $subject
                         echo "status: "$status "  "$private
-                        if [ $last_cmd = "check" ]; then
-                            read -p "Confirm the use of this code [Y/n]: " input
-                            [[ $input != 'Y' ]] && continue
+                        if [ $last_cmd = "--force" ]; then
+                            : 
                         else
-                            echo "!! Abort"
-                            continue
+                            read -p "Confirm the use of this code [Y/n]: " input
+                            [[ $input != 'Y' ]] && echo "!! Abort" && continue
                         fi
                     }
                 }
             else
                 echo -e "\n[$cp_num] - project: "$link" - "$refs
+                echo "@Describe: " $subject
                 echo "status: "$status
-                if [ $last_cmd = "check" ]; then
-                    read -p "Confirm the use of this code [Y/n]: " input
-                    [[ $input != 'Y' ]] && continue
+                if [ $last_cmd = "--force" ]; then
+                    : 
                 else
-                    echo "!! Abort"
-                    continue
+                    read -p "Confirm the use of this code [Y/n]: " input
+                    [[ $input != 'Y' ]] && echo "!! Abort" && continue
                 fi
             fi
             echo >>.$script_name/$CP_LOG
@@ -2533,7 +2737,7 @@ function dit-cp {
         done
         [ ! -f $DOT_DIT/$CP_HISTORY_LOG ] && touch $DOT_DIT/$CP_HISTORY_LOG
         (cat $DOT_DIT/$CP_LOG; printf '\n\n'; cat $DOT_DIT/$CP_HISTORY_LOG) >tmp && mv tmp $DOT_DIT/$CP_HISTORY_LOG
-        [ $last_cmd = '?' ] || rm .$script_name/cp*.temp; rm $SSH_GET
+        [ $last_cmd = '?' ] || rm $SSH_GET
     }
     return 0
 }
@@ -2658,7 +2862,7 @@ function deduplicate_changelog_process {
             local origin_single_repository_linenumbers=$(awk 'NF' $temp_file | wc -l)
             local name_single_repository=$(grep " changed from " $temp_file | awk '{print $1}')
             local sub_temp_file="$(mktemp)"
-            local temp_duplicate="duplicate.temp"
+            local temp_duplicate="duplicate.tmp"
             [ $last_cmd = '?' ] && {
                 [ -f $temp_duplicate ] && rm $temp_duplicate
                 touch $temp_duplicate
@@ -3252,14 +3456,17 @@ commit_count_from_gerrit() {
     rm $temp_file
     rm $temp_file_dedup
     if [[ $state = *-* ]]; then
-        local last_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state |grep -m 1 'createdOn:' |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state |grep -m 1 'createdOn:' |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state |grep -m 1 'lastUpdated:' |awk -F 'createdOn:' '{print $2}' |xargs)
     else
-        local last_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
     fi
-    local first_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $((commit_cnt - 1)) |awk -F 'createdOn:' '{print $2}' |xargs)
+    local first_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $((commit_cnt - 1)) |awk -F 'createdOn:' '{print $2}' |xargs)
+    local first_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $((commit_cnt - 1)) |awk -F 'lastUpdated:' '{print $2}' |xargs)
     echo "$name: $valid_commit_cnt / $commit_cnt"
-    echo "first date: "$first_date
-    echo "last date: "$last_date
+    echo "first date: "$first_create_date " "$first_update_date
+    echo "last date: "$last_create_date " "$last_update_date
     echo "counting code..."
     start_spin
     local cnt=0
@@ -3370,6 +3577,16 @@ function dit-cfg {
             }
             echo "!Input is illegal"
             return 1
+            ;;
+        --commit-editor)
+            prompt="
+ * config commit editor:
+ 1> vim
+ 2> multi line on console
+ 3> multi line on console (unfriendly to chinese )
+ : "
+            read -p "$prompt" editor
+            sudo bash -c "echo $editor >$CFG_IN_DIR/commit.edit"
             ;;
         *)
             echo -e "\n!!Please check the option parameters: [$1]"
@@ -3561,6 +3778,10 @@ EOF
     return 0
 }
 function dit-git {
+    [[ ${EXEC_PARAMS[@]} =~ '-C' ]] && {
+        ${@:1} |tee .$script_name/$REPO_DIFF
+        return
+    }
     readarray -t git_repo_dir < <(find . -type d -name ".git" | xargs -I {} dirname {})
     echo "$"$do_cmd" "$arg2"  @"$(date) >.$script_name/$REPO_DIFF
     for dir in "${git_repo_dir[@]}"; do
@@ -3571,14 +3792,33 @@ function dit-git {
 }
 UPDATE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/doit"
 VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
+UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
 function dit-update {
     CURRENT_VERSION=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
-    [ $last_cmd = '-g' ] && {
+    [[ ${EXEC_PARAMS[@]} =~ '-g' ]] && {
         cp ./out/release_dit ./release/doit
         echo $CURRENT_VERSION >./release/version
+        echo "no care" >./release/upgrade
+        [[ ${EXEC_PARAMS[@]} =~ '--force' ]] && echo "force" >./release/upgrade
         return 0
     }
-    echo "Checking for updates..."
+    [ $1 = '-b' ] && {
+        local check_date="$CFG_IN_DIR/update_check.date"
+        if [ -f "$check_date" ]; then
+            last_date=$(cat "$check_date")
+            today=$(date +"%Y-%m-%d")
+            [ "$last_date" = "$today" ] && return
+            sudo bash -c 'echo "$0" > "$1"' "$today" "$check_date"
+        else
+            today=$(date +"%Y-%m-%d")
+            sudo bash -c 'echo "$0" > "$1"' "$today" "$check_date"
+            return
+        fi
+        FORCED_UPGRADE=$(curl -s "$UPGRADE_URL")
+        [ $last_cmd = '?' ] && echo "upgrade: "$FORCED_UPGRADE
+        [[ $FORCED_UPGRADE != 'force' ]] && return
+    }
+    [ $last_cmd = '-b' ] || echo "Checking for updates..."
     LATEST_VERSION=$(curl -s "$VERSION_URL")
     [ $last_cmd = '?' ] && echo "new: "$LATEST_VERSION
     [ $last_cmd = '?' ] && echo "now: "$CURRENT_VERSION
@@ -3590,15 +3830,15 @@ function dit-update {
         if [ $? -eq 0 ]; then
             mv "doit.tmp" ~/.$script_name/$script_name
             chmod +x ~/.$script_name/$script_name
-            echo "Update successful. Please re-run the script."
+            echo_c -g "Update successful. Please re-run the script."
             return 0
         else
-            echo "Failed to download the update."
+            echo_c -r "Failed to download the update."
             rm -f "doit.tmp"
             return -1
         fi
     else
-        echo "Already up-to-date."
+        [ $last_cmd = '-b' ] || echo "Already up-to-date."
     fi
 }
 function cmd_check {
@@ -3620,6 +3860,7 @@ function cmd_check {
 function BEGIN {
     sudo rm -rf /usr/bin/python
     sudo ln -s /usr/bin/python2.7 /usr/bin/python
+    [ $do_cmd = 'update' ] || $script_name-update -b
     handle_history_file_order
     run_env_check
     update_code_info
@@ -3647,6 +3888,7 @@ function END {
             [ $reval -gt $boundary ] && (echo -e "\n\e[41mERROR!\e[0m"; prompt_tone -1 &)
         }
     }
+    [ $last_cmd = '?' ] || rm -f $DOT_DIT/*.tmp
     exit 0
 }
 function main {
