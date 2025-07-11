@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Jul 10 13:50:33 CST 2025 by skull  ver:25.7.10.13.50
+#@create:Fri Jul 11 10:59:53 CST 2025 by skull  ver:25.7.11.10.59
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -3818,7 +3818,7 @@ function dit-update {
         [ $last_cmd = '?' ] && echo "upgrade: "$FORCED_UPGRADE
         [[ $FORCED_UPGRADE != 'force' ]] && return
     }
-    [ $last_cmd = '-b' ] || echo "Checking for updates..."
+    [ $1 = '-b' ] || echo "Checking for updates..."
     LATEST_VERSION=$(curl -s "$VERSION_URL")
     [ $last_cmd = '?' ] && echo "new: "$LATEST_VERSION
     [ $last_cmd = '?' ] && echo "now: "$CURRENT_VERSION
@@ -3838,7 +3838,7 @@ function dit-update {
             return -1
         fi
     else
-        [ $last_cmd = '-b' ] || echo "Already up-to-date."
+        [ $1 = '-b' ] || echo "Already up-to-date."
     fi
 }
 function cmd_check {
