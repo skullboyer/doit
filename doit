@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Jul 11 10:59:53 CST 2025 by skull  ver:25.7.11.10.59
+#@create:Fri Aug 22 19:33:14 CST 2025 by skull  ver:25.8.22.19.33
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -76,6 +76,7 @@ $script_name init {branch_name} {manifest_xml}
 $script_name sync [--depth] [--rebase]
     --depth             同步代码前净化代码仓(包括删除未跟踪内容)，后跟数字为回滚深度
         [xml]               manifest仓处理
+        [sport]             仅回退运动仓
         [all]               回退所有仓，否则仅回退CP过的代码仓
     --rebase            在当前节点下同步代码附带变基本地提交
     tips:               缺省参数则仅回退不干净的仓，并更新所有仓
@@ -121,6 +122,7 @@ $script_name simul [make] [--enter] [--remount] [--mount] [--umount] [--gapp] [-
     make                不带选项，非ota全量编译
         -d  delta           增量编译
         -o  ota             进行全量ota编译
+        -a  assign          指定config所在目录
     --enter             模拟器启动进入校验
     --remount           全量编译后重新挂载
     --mount             挂载资源，可以做快速验证
@@ -204,11 +206,11 @@ $script_name branch [-v] [-n] [-x] [-d] [-s]
     tips:               指定仓来源于分支查看命令-v -n -x
 
 同步多笔提交
-$script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--diff]
+$script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [--diff]
     -m                  支持同步的提交信息change-number、change-id、commit-hash、topic、hashtag
                             缺省则对非NEW状态的提交进行选择，提交状态：ABANDONED、MERGED、NEW
         --force             强制同步指定的所有提交
-        [counter]           统计代码的修改行数，不应用修改
+        --count             统计代码的修改行数，不应用修改
     --undo              撤销同步的修改，缺省参数撤销的是最近一次同步的提交
         [assign]            撤销指定的同步提交，支持commit-id、change-number、change-id、topic、hashtag
             [preview]           预演撤销的仓库
@@ -221,7 +223,11 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--diff]
     --fail              检查同步失败的提交
     --abort             丢弃同步失败的提交
     --merge             解决完同步的冲突后，完成提交
+        -v                  查看具体内容
         --no-push           只解冲突不push
+    --push              推送同步的提交到远端，gerrit上无法同步时，可用于跨分支推送 (谨慎操作)
+        -v                  查看具体内容
+        --new-commit        同步提交作为新提交重新push
     --diff              以check为基准，查看修改明细，结果写入cp_check.diff
     tips:               topic对应的提交信息见记录topic_packet.txt，同步过程记录见topic_log.txt
 
@@ -357,6 +363,16 @@ berlin
 lille
 res_tool
 )
+sport_modules=(
+"framework/engine/sportEngine"
+"packages/apps/sports"
+"packages/services/sport"
+"ui/Sports"
+"ui/SportRecord"
+"ui/SportSecondary"
+"ui/SportStatus"
+"ui/phn"
+"ui/translations")
 DOT_DIT=$current_path/.$script_name
 CFG_IN_DIR="/etc/dit"
 [ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
@@ -649,7 +665,7 @@ select_config() {
     while :
     do
         num=0
-        for file in `ls -1 configs/$config_select |grep $keyword`
+        for file in `ls -1 $1 |grep $keyword`
         do
             echo "$num> $file"
             temp_config[num]=$file
@@ -672,20 +688,24 @@ select_config() {
         [[ $config_select =~ "_defconfig" ]] && break
     done
 }
-complex_product_config() {
-    [ $do_cmd = 'simul' ] && config_select='simulator'
-    select_config
-}
 product_config() {
-    [ $do_cmd = 'simul' ] && complex_product_config || {
-        [[ ${EXEC_PARAMS[@]} =~ '-s' ]] && complex_product_config || reduced_product_config
-    }
+    if [ $do_cmd = 'simul' ]; then
+        if [[ -n $1 ]]; then
+            select_config "$1"
+        else
+            select_config "configs/simulator"
+        fi
+    elif [[ ${EXEC_PARAMS[@]} =~ '-s' ]]; then
+        select_config "configs/simulator"
+    else
+        reduced_product_config
+    fi
 }
 git_fallback() {
     repo forall -c git reset --hard HEAD~$1
     echo -e "\n\e[42m ! The code rollback is complete \e[0m\n"
     repo forall -c git clean -df
-    repo sync
+    repo sync -j16
 }
 grep_branch() {
     repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/branch.tmp
@@ -1060,7 +1080,7 @@ update_code_info() {
         fi
         cd - >/dev/null
         echo "branch: "$branch >>.$script_name/$CODE_INFO
-        xml=$(ls -l .repo |grep manifest.xml |cut -d '/' -f2)
+        xml=$(sed -nE "s/.*['\"]([^'\"]*\.xml[^'\"]*)['\"].*/\1/p" .repo/manifest.xml)
         [[ -z $xml ]] && xml="unKnown"
         echo "xml: "$xml >>.$script_name/$CODE_INFO
     fi
@@ -1321,7 +1341,20 @@ function dit-sync {
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
         [[ ${EXEC_PARAMS[@]} =~ 'xml' ]] && git -C .repo/manifests reset --hard HEAD~$depth
-        [ $last_cmd = 'all' ] && [[ $depth =~ ^[0-9]+$ ]] && git_fallback $depth && return
+        [ $last_cmd = 'all' ] && [[ $depth =~ ^[0-9]+$ ]] && {
+            git_fallback $depth
+            return
+        }
+        [[ $last_cmd = 'sport' ]] && {
+            local branch=$(grep branch .$script_name/$CODE_INFO |cut -d " " -f2)
+            for module in "${sport_modules[@]}"; do
+                echo_c -b "  $module"
+                git -C $module reset --hard HEAD~$depth
+                git -C $module pull origin $branch
+                echo
+            done
+            return
+        }
         local sync_file=$(mktemp)
         if [ -f $DOT_DIT/$CP_CHECK ]; then
             cat $DOT_DIT/$CP_CHECK |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
@@ -1532,13 +1565,18 @@ function dit-simul {
             make JOBS=16
             [ $? != 0 ] && return -1
         else
-            product_config
+            if [[ ${EXEC_PARAMS[@]} =~ '-a' ]]; then
+                get_option_index_and_value -a
+                product_config $OPTION_VALUE
+            else
+                product_config
+            fi
             cd build
             if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
                 make clean
                 make distclean
                 make $config_select
-                make ota #JOBS=16
+                make ota JOBS=16
                 [ $? != 0 ] && return -1
                 cd - >/dev/null
                 [ -f vmmc.bin ] && rm vmmc.bin
@@ -1876,31 +1914,32 @@ prompt="
         do
             [ ! $input ] && {
                 read -p "$(printf "%s $prompt \n\nYou Choice: ")" input
-                bt="$input"
+                local temp_input="$input"
             }
             echo_c blue "Operation options: [$input] ${prompt_array[$input]}"
             case $input in
                 Y|M)
-                    [ ! $branch ] && bk=$input && input=I && continue
+                    [ ! $branch ] && bt=$input && input=I && continue
                     local result=$(git branch -a| grep "remotes/origin/$branch")
                     [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
                     [[ ! $message ]] && {
+                        echo_c purple "* Press 'Q' to return to the menu"
                         while :
                         do
                             read -p "> commit message: " temp_message
-                            [ ! "$temp_message" ] && continue || {
-                                message=$temp_message
-                                break
-                            }
+                            [ ! "$temp_message" ] && continue
+                            message=$temp_message
+                            break
                         done
                     }
+                    [ "$temp_message" = 'Q' ] && unset input && continue
                     git commit -m "$message"
                     [ $input = 'M' ] && git commit --amend
                     input="push" && continue
                     ;;
                 N)
                     echo -e "\e[43m\e[31m!!Skip this commit...\e[0m"
-                    if [[ $bt = 'C' ]]; then
+                    if [[ $bk = 'C' ]]; then
                         git reset HEAD@{1}
                     else
                         git reset
@@ -1938,14 +1977,13 @@ prompt="
                     reentry="no"
                     branch=$temp_branch
                     git commit --amend --no-edit
-                    input="push" && continue
+                    bt=$input && input="push" && continue
                     ;;
                 B)
                     echo "> remote branch:"
                     git branch |grep detached && git branch -a |grep "\->" || git branch -vv
                     git branch -a |grep "\->"
                     read -p " new branch: " branch
-                    input=$bk && continue
                     ;;
                 A)
                     git status -s
@@ -1971,7 +2009,7 @@ prompt="
                     echo " * Branch:   "$branch
                     echo " * Message:  $message"
                     echo " * Topic:    "$topic
-                    echo "(If no modification is needed, press 'Enter'. To go back, input 'Q'.)"
+                    echo_c purple "(If no modification is needed, press 'Enter'. To go back, input 'Q'.)"
                     read -p "> commit branch: " temp_branch
                     [[ $temp_branch == 'Q' || ( -z $temp_branch && -z $branch ) ]] && {
                         unset input
@@ -1995,12 +2033,13 @@ prompt="
                             temp_message=$(cat)
                             ;;
                     esac
+                    [ "$temp_message" = 'Q' ] && unset input && continue
                     [ "$temp_message" ] && message=$temp_message
                     echo -e "\n"
                     echo "(Keep, press 'Enter'. Clean, press 'Space'.)"
                     read -p "> commit topic: " temp_topic
                     [[ $temp_topic ]] && topic=$temp_topic
-                    input=$bk && continue
+                    input=$bt && continue
                     ;;
                 L)
                     local depth=1
@@ -2034,7 +2073,7 @@ prompt="
                     no_push="no"
                     ;;
                 Q)
-                    if [[ $bt = 'C' ]]; then
+                    if [[ $bk = 'C' ]]; then
                         git reset HEAD@{1}
                     else
                         git reset
@@ -2071,10 +2110,10 @@ prompt="
                     echo -e "\e[47m\e[31m!!Please check the input\e[0m"
                     ;;
             esac
-            bk=$bt
-            unset input
+            bk=$temp_input
+            unset bt input
         done
-        unset bk input
+        unset bt bk input
         arg3=$branch
         cd - >/dev/null
     done
@@ -2508,6 +2547,7 @@ function dit-cp {
         [ ! -s .$script_name/$CP_FAIL ] && echo "! Please execute the --fail option first" && return 1
         readarray -t projects < <(grep "^project" .$script_name/$CP_FAIL |cut -d ' ' -f2)
         for project in "${projects[@]}"; do
+            echo_c blue "\n  $project\n"
             cd $project
             [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && git diff
             git add -u
@@ -2535,7 +2575,7 @@ function dit-cp {
                     read -p "!!!Continue? [N/y]: " select
                     [ $select != 'y' ] && {
                         read -p "I think you should push this branch: $current_branch [Y/n]: " select
-                        [ $select != 'Y' ] && continue
+                        [ $select != 'Y' ] && cd - >/dev/null && continue
                         branch=$current_branch
                     }
                 }
@@ -2544,6 +2584,56 @@ function dit-cp {
                 read -p "Input commit branch: " branch
                 git push origin HEAD:refs/for/$branch
             fi
+            cd - >/dev/null
+        done
+        return 0
+    }
+    [ $arg2 = "--push" ] && {
+        [ ! -s .$script_name/$CP_CHECK ] && echo_c yellow "! Please execute the --check option first" && return 1
+        readarray -t projects < <(grep "^project" .$script_name/$CP_CHECK |cut -d ' ' -f2)
+        for project in "${projects[@]}"; do
+            echo_c blue "\n  $project\n"
+            cd $project
+            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && git show
+            local change_id=$(git log -1 |grep Change-Id |awk -F " " '{print $2}')
+            readarray -t branches < <(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
+            local number=0
+            for branch in "${branches[@]}"; do
+                echo "$number>: $branch"
+                ((number++))
+            done
+            read -p "Please select branch: " select
+            [[ $select =~ ^[0-9]+$ ]] && branch=${branches[$select]}
+            read -p "Confirm commit branch: $branch  [Y/N/M]: " choice
+            if [[ $choice = 'Y' ]] ; then
+                if ret=$(get_current_branch); then
+                    current_branch="$ret"
+                else
+                    echo "$ret"
+                fi
+                [[ $current_branch != $branch ]] && {
+                    echo -e "\n!Local branch is inconsistent with push branch"
+                    echo "!!You'd better not do that"
+                    read -p "!!!Continue? [N/y]: " select
+                    [ $select != 'y' ] && {
+                        read -p "I think you should push this branch: $current_branch [Y/n]: " select
+                        [ $select != 'Y' ] && cd - >/dev/null && continue
+                        branch=$current_branch
+                    }
+                }
+            elif [[ $choice = 'M' ]]; then
+                read -p "Input commit branch: " branch
+            else
+                cd - >/dev/null && continue
+            fi
+            [[ ${EXEC_PARAMS[@]} =~ '--new-commit' ]] && {
+                message=$(git log -1 --format=%s)
+                git reset HEAD^
+                git add -u
+                git status
+                git commit -m "$message"
+            }
+            git push origin HEAD:refs/for/$branch
             cd - >/dev/null
         done
         return 0
@@ -2658,7 +2748,7 @@ function dit-cp {
             }
         }
         [[ ! -f $SSH_GET || ! -f $PROCESS_RESULT ]] && echo "ssh request empty!" && return 1
-        [ $last_cmd = 'counter' ] && {
+        [ $last_cmd = '--count' ] && {
             count_code_line_from_gerrit $SSH_GET
             return $?
         }
@@ -3142,7 +3232,6 @@ function deduplicate_changelog_process {
     return 0
 }
 module_hit_table=("sport")
-sport_module=("framework/engine/sportEngine" "packages/apps/sports" "packages/services/sport" "ui/Sports" "ui/SportRecord" "ui/SportSecondary" "ui/SportStatus")
 function changelog_find_owner {
     local counter=1
     local sub_counter=1
@@ -3267,7 +3356,7 @@ function changelog_find_owner {
         [[ $module_hit = 'sport' ]] && {
             if [[ "$line" == *" changed from "* ]]; then
                 find_done=0
-                for module in "${sport_module[@]}"; do
+                for module in "${sport_modules[@]}"; do
                     if [[ "$line" == *"$module"* ]]; then
                         find_done=1
                         break
@@ -3498,7 +3587,7 @@ function dit-tools {
     option_check $arg2
     sudo rm -rf /usr/bin/python
     sudo ln -s /usr/bin/python3.8 /usr/bin/python
-    scripts_path="/mnt/e/skull/scripts"
+    scripts_path="/mnt/f/skull/boyer/dit"
     case $arg2 in
         map)
             map
@@ -3534,7 +3623,7 @@ function dit-cfg {
         --mk-product)
             local output_file=".$script_name/$MAKE_MENU"
             [[ ${EXEC_PARAMS[@]} =~ '-d' ]] && rm $output_file
-            [[ ${EXEC_PARAMS[@]} =~ '-e' ]] && touch $output_file
+            [[ ${EXEC_PARAMS[@]} =~ '-e' ]] && >$output_file
             [ ! -f $output_file ] && {
                 for string in "${enum_config[@]}"
                 do
@@ -3703,6 +3792,7 @@ function dit-comple {
         comple_path=$arg3
     } || {
         comple_path=$script_path
+        echo "script_path  $script_path"
     }
     [[ ${EXEC_PARAMS[@]} =~ '-w' ]] && {
         add_env_path="source $comple_path/.$script_name/$comple_file"
@@ -3710,13 +3800,16 @@ function dit-comple {
         sed -i '/'^"$escape_str"$'/d' ~/.bashrc
         echo $add_env_path >> ~/.bashrc && source ~/.bashrc
     }
-    cat > $comple_path/.$script_name/$comple_file <<EOF
+    dit_path="$comple_path"
+    [ -n "$script_exe_path" ] && dit_path="$script_exe_path"
+    cat > $comple_path/$comple_file <<EOF
 #/usr/bin/env bash
 #@create:$(date) by skull
-${script_name}_path=$script_exe_path/$script_name
+${script_name}_path="$dit_path/$script_name"
 [ ! -f \$${script_name}_path ] && return
 function define_complete {
     arg=''
+    is_dir=0
     COMPREPLY=()
     case \$COMP_CWORD in
         1)
@@ -3758,15 +3851,20 @@ function define_complete {
             arg=''
         fi
         if [[ -z "\$arg" ]]; then
-            if [[ -d "\${COMP_WORDS[COMP_CWORD - 1]}" ]]; then
-                arg=\$(la "\${COMP_WORDS[COMP_CWORD - 1]}")
+            if [[ -d "\${COMP_WORDS[COMP_CWORD]%/*}" || -d "\${COMP_WORDS[COMP_CWORD]}" || -d "\${COMP_WORDS[COMP_CWORD - 1]}" ]]; then
+                is_dir=1
             else
                 arg=\$(la)
             fi
         fi
         ;;
     esac
-    COMPREPLY=(\$(compgen -W "\$arg" -- \${COMP_WORDS[COMP_CWORD]}))
+    if [[ \$is_dir == 1 ]]; then
+        compopt -o filenames -o nospace 2>/dev/null
+        COMPREPLY=(\$(compgen -f -- "\${COMP_WORDS[COMP_CWORD]}"))
+    else
+        COMPREPLY=(\$(compgen -W "\$arg" -- \${COMP_WORDS[COMP_CWORD]}))
+    fi
 }
 complete -F define_complete $script_name
 EOF
