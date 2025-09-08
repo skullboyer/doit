@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Aug 22 19:33:14 CST 2025 by skull  ver:25.8.22.19.33
+#@create:Fri Sep  5 11:05:38 CST 2025 by skull  ver:25.9.5.11.05
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -73,8 +73,10 @@ $script_name init {branch_name} {manifest_xml}
     manifest_xml        要切换的xml配置文件，缺省则为huamiOS.xml
 
 同步代码仓库
-$script_name sync [--depth] [--rebase]
-    --depth             同步代码前净化代码仓(包括删除未跟踪内容)，后跟数字为回滚深度
+$script_name sync [--depth] [--repo] [--rebase]
+    --depth             同步代码前净化代码仓(包括删除未跟踪内容)，不带--repo选项则同步所有仓
+        {number}            回滚深度
+    --repo              更新的代码仓范围
         [xml]               manifest仓处理
         [sport]             仅回退运动仓
         [all]               回退所有仓，否则仅回退CP过的代码仓
@@ -96,15 +98,15 @@ $script_name xml [-s] [-g] [-d]
         new_xml             生成代码差异changelog的新节点xml
 
 构建项目
-$script_name make [-d] [-o] [-a] [-t] [-r] [-s] [-v] [-fw] [--backup] [--restore]
+$script_name make [-d] [-o] [-t] [-r] [-s] [-v] [--firware-ota] [--backup] [--restore]
     -d  delta           增量编译
-    -o  ota             ota升级包编译
-    -a  all             全编译，同'-o'选项一起使用，如T3需先编译小核再编译大核
+        --firware-ota       增量固件OTA包
+    -o  ota             ota全量包编译
     -t  tiny            制作差分包
     -r  release         release版本，缺省为debug版本
     -s  select          选择要构建的项目，缺省则在后面选择
     -v  version         指定版本号，版本号写在最后，缺省则为默认版本号：年.月.日.时.分
-    -fw firware-ota     单固件OTA包
+    --firware-ota       单固件OTA包
     --backup            备份ota，为快速验证
     --restore           还原ota，为快速验证
     --skip              跳过编译，通常用于制作差分包或打固件升级包，如 -t, -fw
@@ -193,16 +195,25 @@ $script_name tiny [-p] [-t]
 
 代码仓分支操作
 $script_name branch [-v] [-n] [-x] [-d] [-s]
-    -v  view            查看指定分支存在的代码仓
+    -v  view            查看指定分支存在的代码仓，若想看所有分支，可输入空 ''，""，' '，" "
     -n  exclude         查看指定分支不存在的代码仓
     -x  active          查看指定分支激活的代码仓
     -d  delete          删除指定分支
     tips:               上述选项后跟分支名，结果存入branch.tmp
-    -s  switch          切换分支
-        {target_branch}     仅携带这1个参数，在指定仓中切换目标分支
-        {multi_branch}      多变分支名，--f选项时做远端分支，--d选项时做待删除分支，缺省(--f、--d)则表示在指定仓中创建分支，指定仓来自上条branch命令
-        --f                 全仓创建target分支，target_branch multi_branch --f
-        --d                 删除multi分支并切换target，target_branch multi_branch --d
+    -s  switch          创建并切换分支
+        --delete
+        --create-all
+        --create-local
+        --create-remote
+        --create-all-local
+        {arg1}          仅携带这1个参数，则在指定仓中创建并切换到 arg1 分支
+        {arg2}          多变参数
+                            create-local 指定仓创建并切换到 arg1 分支
+                            create-all-local 全仓创建并切换到 arg1 分支
+        {arg3}          多变参数
+                            delete 指定仓删除 arg2 分支并切换到 arg1 分支
+                            create-all 全仓创建并切换到 arg1 分支，且跟踪远端 arg2 分支
+                            create-remote 指定仓创建并切换到 arg1 分支，且跟踪远端 arg2 分支
     tips:               指定仓来源于分支查看命令-v -n -x
 
 同步多笔提交
@@ -211,6 +222,9 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [-
                             缺省则对非NEW状态的提交进行选择，提交状态：ABANDONED、MERGED、NEW
         --force             强制同步指定的所有提交
         --count             统计代码的修改行数，不应用修改
+        --squash            为压缩提交准备好分支，一般与选项 interact 一起使用
+        --interact          交互式同步，冲突时待解决后继续
+        --test              同步测试，看下有没有冲突
     --undo              撤销同步的修改，缺省参数撤销的是最近一次同步的提交
         [assign]            撤销指定的同步提交，支持commit-id、change-number、change-id、topic、hashtag
             [preview]           预演撤销的仓库
@@ -241,8 +255,9 @@ $script_name commit [-m] [--log]
     tips:               缺省选项参数可在后面输入，执行前须执行diff命令，支持各提交自定义分支、各提交文件选择、是否提交及跳过
 
 推送提交
-$script_name push [--depend]
+$script_name push [--depend] [--squash]
     --depend            指定推送提交的依赖文件
+    --squash            压缩提交并推送，需配合 cp -m --squash
 
 工具集合
 $script_name tools [map] [crc] [display] [owner] [commit]
@@ -394,6 +409,8 @@ QUERY_LOG="query.log"
 HANDLE_HISTORY="handle.history"
 MAKE_MENU="make.product"
 CHANGELOG_OUT=$DOT_DIT"/changelog_out"
+BRANCH_RESULT="branch.txt"
+SQUASH_DIR="squash_commit.dir"
 source_dir='build/out/watch@*/binary'
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
@@ -401,6 +418,7 @@ read_dir=/mnt/d/work/code
 dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
 [ -f $HOME/.$script_name/signature.path ] && sig_file=$(<$HOME/.$script_name/signature.path) || sig_file="$sign_file_path/sign.pem"
+NEGATIVE_BOUNDARY=250
 escape_for_grep() {
     local input="$1"
     local escaped
@@ -480,6 +498,14 @@ contains_element() {
 }
 is_valid_cmd() {
     contains_element "$1" "${EXEC_PARAMS[@]}"
+    return $?
+}
+hit_option() {
+    contains_element "$1" "${EXEC_PARAMS[@]}"
+    return $?
+}
+hit_target() {
+    contains_element "$1" "$@"
     return $?
 }
 sub_help() {
@@ -598,14 +624,17 @@ handle_history_file_order() {
     [ -f $DOT_DIT/history.cfg ] && $(<$DOT_DIT/history.cfg)
     case $history_order in
         LIFO)
-            echo $(date)" : \$$_EXEC_PARAMS " >>$handle_history
-            tac $handle_history
+            tac $handle_history >handle_history.tmp
+            echo $(date)" : \$$_EXEC_PARAMS " >>handle_history.tmp
+            tac handle_history.tmp >$handle_history
             ;;
         FIFO)
             echo $(date)" : \$${EXEC_PARAMS[@]} " >>$handle_history
             ;;
         *)
-            echo $(date)" : \$$_EXEC_PARAMS " >>$handle_history
+            tac $handle_history >handle_history.tmp
+            echo $(date)" : \$$_EXEC_PARAMS " >>handle_history.tmp
+            tac handle_history.tmp >$handle_history
             ;;
     esac
 }
@@ -639,8 +668,10 @@ reduced_product_config() {
     do
         echo "$index> ${enum_config[$index]}"
     done
-    echo -e "q: exit"
+    echo_c -c "\n--find: Direct search, skip the default list"
+    echo_c -c "q/Q: Exit"
     read -p "Please select product or input keyword: " select
+    [[ $select = "--find" ]] && simple_select_config && return
     [[ $select = "q" || $select = "Q" ]] && exit 1
     [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} || {
         [[ ${enum_config[@]} =~ $select ]] && {
@@ -700,6 +731,7 @@ product_config() {
     else
         reduced_product_config
     fi
+    echo_c -y "config: "$config_select
 }
 git_fallback() {
     repo forall -c git reset --hard HEAD~$1
@@ -708,43 +740,53 @@ git_fallback() {
     repo sync -j16
 }
 grep_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/branch.tmp
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/$BRANCH_RESULT
 }
 grep_active_branch() {
-    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/branch.tmp
+    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/$BRANCH_RESULT
 }
 grep_not_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/branch.tmp
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/$BRANCH_RESULT
 }
 delete_branch() {
-    repo forall -p -c 'git branch -D '$1'' |tee .$script_name/branch.tmp
+    repo forall -p -c 'git checkout --detach '$1'; git branch -D '$1'' |tee .$script_name/$BRANCH_RESULT
 }
 switch_branch() {
     [ -z $1 ] && echo "Please input correct arguments!" && exit -1
-    [[ ! -z $3 && $3 = "--f" ]] && {
+    [[ -n $1 && $2 = "--create-all-local" ]] && {
+        repo forall -c git checkout -b $1
+        return
+    }
+    [[ -n $1 && -n $2 && $3 = "--create-all" ]] && {
         repo forall -c git checkout -b $1 origin/$2
         return
     }
+    cd .$script_name
     [[ -f dir.branch.tmp ]] || {
-        [[ ! -f branch.tmp ]] && echo "Make sure the target branch file exists!" && exit -1
-        grep project branch.tmp > .$script_name/project.branch.tmp
+        [[ ! -f $BRANCH_RESULT ]] && echo "Make sure the target branch file exists!" && return -1
+        grep project $BRANCH_RESULT >project.branch.tmp
         awk '{$1="";print $0}' project.branch.tmp > dir.branch.tmp
     }
+    cd - >/dev/null
     while read line
     do
-        cd $line
-        [ -z $2 ] && {
-            git checkout $1
-        } || {
-            [[ ! -z $3 && $3 = "--d" ]] && {
-                git checkout $1 && git branch -D $2
-            } || {
-                git checkout -b $1 origin/$2
-            }
-        }
-        echo -e ": " $line "\n"
-        cd - >/dev/null
-    done < dir.branch.tmp
+        echo_c -b "\n: $line"
+        [[ -n $1 && -z $2 ]] && git -C $line checkout $1 && continue
+        [[ -n $1 && $2 = "--create-local" ]] && git -C $line checkout -b $1 && continue
+        [[ -n $1 && -n $2 && $3 = "--create-remote" ]] && git -C $line checkout -b $1 origin/$2 && continue
+        [[ -n $1 && -n $2 && $3 = "--delete" ]] && git -C $line checkout $1 && git -C $line branch -D $2 && continue
+    done < .$script_name/dir.branch.tmp
+}
+squash_commit_create_branch() {
+    origin_branch="origin/$1"
+    squash_commit_dir=$2
+    while read line
+    do
+        echo_c -b ": "$line "\n"
+        git -C $line checkout -b squash $origin_branch
+        git -C $line checkout -b squash_draft $origin_branch
+        echo ""
+    done < $squash_commit_dir
 }
 _parse_dirctory() {
     dirconfig=`find /home ! -path '/home/skull/work/scripts/*' -iname $dir_cfg`
@@ -860,7 +902,8 @@ backup_firmware() {
         [[ $1 =~ $product ]] && break
     done
     [ $product = ${enum_product_name[-1]} ] && local product=$(echo "$1" | cut -d '_' -f 2)
-    echo $product |tee .$script_name/bak/indicator.product
+    echo "backup: " $product
+    echo $product >.$script_name/bak/indicator.product
     [ ! -d .$script_name/bak/$product ] && mkdir -p .$script_name/bak/$product/diff
     echo -e "\n\e[42mBackup firmware complete!\e[0m\n" 
 }
@@ -1060,6 +1103,10 @@ get_current_branch() {
     }
     return 1
 }
+get_active_map_remote_branch() {
+    local branch=$(git rev-parse --abbrev-ref --symbolic-full-name @{u})
+    echo "$branch"
+}
 update_code_info() {
     if is_valid_cmd 'init'; then
         echo $(date) >.$script_name/$CODE_INFO
@@ -1115,11 +1162,68 @@ get_option_index_and_value() {
     OPTION_VALUE=$value
     [ $last_cmd = '?' ] && echo "Index: "$OPTION_INDEX "Value: "$OPTION_VALUE
 }
+parse_options() {
+    local option_count=0
+    local option="$1"
+    local -a values=()
+    local -a indices=()
+    local args=("${EXEC_PARAMS[@]}")
+    for ((i = 0; i < "${#args[@]}"; i++)); do
+        arg="${args[$i]}"
+        case $arg in
+            $option=*)
+                values+=("${arg#$option=}")
+                indices+=("$i")
+                ((option_count++))
+                ;;
+            $option)
+                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
+                    values+=("${args[$((i + 1))]}")
+                    indices+=("$((i + 1))")
+                    ((option_count++))
+                    ((i++)) 
+                else
+                    echo_c yellow "Warning: Option $option requires a non-empty value." >&2
+                    return -1
+                fi
+                ;;
+        esac
+    done
+    OPTION_INDEX=("${indices[@]}")
+    OPTION_VALUE=("${values[@]}")
+    if [[ $last_cmd = '?' ]]; then
+        echo "Index: ${OPTION_INDEX[*]}"
+        echo "Values: ${OPTION_VALUE[*]}"
+    fi
+    [[ $option_count -eq 0 ]] && {
+        echo_c yellow "Warning: Option $option unknown." >&2
+        return -2
+    }
+    return $option_count
+}
 test_get_option() {
     get_option_index_and_value --name
-    echo "index: "$OPTION_INDEX
-    get_option_index_and_value --value
+    echo "index: "$OPTION_INDEX " value: "$OPTION_VALUE
+    echo
+    ret=$(parse_options --name)
+    echo "\$?: "$?
+    echo "ret: "$ret
+    echo
+    parse_options --name
+    echo "\$?: "$?
+    echo
+    for i in "${!OPTION_INDEX[@]}"
+    do
+        echo "index: "${OPTION_INDEX[i]} " value: "${OPTION_VALUE[i]}
+    done
+    echo
+    parse_options --value
+    echo "\$?: "$?
     echo "value: "$OPTION_VALUE
+    echo
+    parse_options --name
+    echo "\$?: "$?
+    [[ ${OPTION_VALUE[@]} =~ 'boyer' ]] && echo "OPTION_VALUE: "${OPTION_VALUE[@]}
 }
 extract_option() {
     help_file="dit.sh"
@@ -1337,15 +1441,24 @@ function dit-xml {
 }
 function dit-sync {
     option_check $arg2
-    if [[ $arg2 = '--depth' ]]; then
+    if hit_option '--depth'; then
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
-        [[ ${EXEC_PARAMS[@]} =~ 'xml' ]] && git -C .repo/manifests reset --hard HEAD~$depth
-        [ $last_cmd = 'all' ] && [[ $depth =~ ^[0-9]+$ ]] && {
+        [[ ! $depth =~ ^[0-9]+$ ]] && depth=0
+        if ! hit_option '--repo'; then
+            git_fallback $depth
+            return
+        fi
+    fi
+    if hit_option '--repo'; then
+        parse_options --repo
+        [[ $? -gt $NEGATIVE_BOUNDARY ]] && return 1
+        [[ ${OPTION_VALUE[@]} =~ 'xml' ]] && git -C .repo/manifests reset --hard HEAD~$depth
+        [[ ${OPTION_VALUE[@]} =~ 'all' ]] && {
             git_fallback $depth
             return
         }
-        [[ $last_cmd = 'sport' ]] && {
+        [[ ${OPTION_VALUE[@]} =~ 'sport' ]] && {
             local branch=$(grep branch .$script_name/$CODE_INFO |cut -d " " -f2)
             for module in "${sport_modules[@]}"; do
                 echo_c -b "  $module"
@@ -1445,7 +1558,7 @@ function dit-make {
             update_product_list $config_select
             backup_firmware $config_select
             cd build
-            if [[ ! ${EXEC_PARAMS[@]} =~ '-fw' ]]; then
+            if [[ ! ${EXEC_PARAMS[@]} =~ '--firware-ota' ]]; then
                 make clean
                 make distclean
             fi
@@ -1473,8 +1586,7 @@ function dit-make {
         echo "delta version: "$version >>$OTA_VERSION
         echo "build info: "$debug_release" by "$GERRIT_USER" @"$(date) >>$OTA_VERSION
         [[ `pwd` =~ 'build' ]] || cd build
-        [[ ${EXEC_PARAMS[@]} =~ '-a' ]] && {
-            echo "config_select: "$config_select
+        if hit_option '-o'; then
             [[ $config_select =~ "mhs003" ]] && {
                 local tmp="${config_select#mhs003_}"
                 local product="${tmp%_defconfig}"
@@ -1484,9 +1596,8 @@ function dit-make {
                 make BUILD_DIR=out_hub APPDIR=out_hub
                 cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003.bin ../platform/board/mhs003/products/${product}/sensorhub
                 cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003_sign.bin ../platform/board/mhs003/products/${product}/sensorhub
+                echo_c -g "Small core compilation completed!\n"
             }
-        }
-        if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
             make ota -j16
         else
             make -j16
@@ -1512,7 +1623,7 @@ function dit-make {
             python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ../.$script_name/bak/$product/diff/watch@mimxrt595_ota_sign.zip
         }
     }
-    [[ ${EXEC_PARAMS[@]} =~ '-fw' ]] && {
+    [[ ${EXEC_PARAMS[@]} =~ '--firware-ota' ]] && {
         [[ `pwd` =~ 'build' ]] || cd build
         cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
         sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
@@ -1886,9 +1997,10 @@ function dit-commit {
     local bk=""
 prompt="
 -------------------------------------------------------------------------------------------------------
- (Y)confirm commit     (M)mount commit    (N)skip commit          (C)amend commit      (B)change branch
- (A)add file           (X)exclude file    (V)view diff            (I)info check        (L)view log
- (G)new commit         (O)only commit     (R)resolve conflicts    (E)clear settings    (Q)exit"
+ (Y)confirm commit    (M)mount commit    (N)skip commit    (C)amend commit         (B)change branch
+ (A)add file          (X)exclude file    (V)view diff      (I)info check           (L)view log
+ (G)new commit        (O)only commit     (S)single push    (R)resolve conflicts    (E)clear settings
+ (Q)exit"
     declare -A prompt_array
     while read -r part; do
         key=$(echo "$part" | sed -E 's/^\(([A-Z])\).*/\1/')
@@ -2063,6 +2175,15 @@ prompt="
                     echo "* only commit not push"
                     no_push="yes"
                     ;;
+                S)
+                    [ ! $branch ] && bt=$input && input=I && continue
+                    read -p "Enter the commit ID to be pushed: " commit_id
+                    local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
+                    git branch origin_single_push
+                    git checkout -b single_push origin/$remote_branch
+                    git cherry-pick $commit_id
+                    bt=$input && input="push" && continue
+                    ;;
                 R)
                     git add -u
                     git status
@@ -2086,12 +2207,22 @@ prompt="
                         current_branch="$ret"
                     fi
                     [[ $current_branch != $branch ]] && {
-                        echo -e "\n!Local branch is inconsistent with push branch"
-                        echo "!!You'd better not do that"
+                        echo_c -c "\n!Local branch is inconsistent with push branch"
+                        echo "local: "$current_branch
+                        echo "push: "$branch
+                        echo_c -y "!!You'd better not do that"
                         read -p "!!!Continue? [N/y]: " select
                         [ $select != 'y' ] && {
                             read -p "I think you should push this branch: $current_branch [Y/n]: " select
-                            [ $select != 'Y' ] && git reset HEAD^ && unset input && continue
+                            [ $select != 'Y' ] && {
+                                if [[ $bt = 'S' ]]; then
+                                    git checkout --detach origin_single_push
+                                    git branch -D single_push origin_single_push
+                                else
+                                    git reset HEAD^
+                                fi
+                                unset input && continue
+                            }
                             branch=$current_branch
                         }
                     }
@@ -2102,6 +2233,10 @@ prompt="
                     else
                         echo -e "- New Commit""\r\n" >>$temp_commit_log
                         git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
+                        [[ $bt = 'S' ]] && {
+                            git checkout --detach origin_single_push
+                            git branch -D single_push origin_single_push
+                        }
                     fi
                     echo -e "\r\n" >> $temp_commit_log
                     break
@@ -2133,39 +2268,65 @@ prompt="
 function dit-push {
     [[ ${EXEC_PARAMS[@]} =~ '--depend' ]] && {
         get_option_index_and_value --depend
-        push_file=$OPTION_VALUE
+        push_file=.$script_name/$OPTION_VALUE
+        [ ! -f "$push_file" ] && echo_c -y "Missing File: $push_file" && return -1
+        readarray -t repo_path < <(cat $push_file | grep -w "^project" | awk -F " " '{print $2}')
     }
-    [[ -n "$push_file" ]] && {
-        readarray -t repo_path < <(cat .$script_name/$push_file | grep -w "^project" | awk -F " " '{print $2}')
-        local branch=master
-        for ((index=0; index<${#repo_path[@]}; index++))
-        do
-            echo -e "\n"
-            cd ${repo_path[$index]}
-            pwd
-            if ret=$(get_current_branch); then
-                current_branch="$ret"
-            else
-                echo "$ret"
-            fi
-            echo "Branch: "$current_branch
-            [ -n "$current_branch" ] && branch="$current_branch"
-            git show --stat
-            unset enter
-            read -p "$(echo -e '\nConfirm the submit on <'"$branch"'>: Y/N?\nor modify submit branch: M?')  " enter
-            [[ $enter = 'Q' || $enter = 'q' ]] && exit 0
-            [[ $enter = 'M' ]] && {
-                read -p "new branch name: " bn_enter
-                branch=$bn_enter
-                enter=Y
-            }
-            [[ $enter = 'Y' ]] && {
-                git push origin HEAD:refs/for/$branch
-            }
-            cd - >/dev/null
-        done
-        return 0
+    [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
+        push_file=.$script_name/$SQUASH_DIR
+        [ ! -f "$push_file" ] && echo_c -y "Missing File: $push_file" && return -1
+        readarray -t repo_path < <(cat $push_file)
     }
+    local branch=master
+    for ((index=0; index<${#repo_path[@]}; index++))
+    do
+        echo_c -b "\n: ${repo_path[$index]}"
+        cd ${repo_path[$index]}
+        [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
+            git branch -v
+            while true
+            do
+                read -p "confirm branch Y: " input
+                [ $input = 'Y' ] && break
+            done
+            git merge --squash squash_draft
+            while true
+            do
+                echo -e "\n> (press Ctrl+D to finish.Keep, press 'Enter'. ) commit message:"
+                temp_message=$(cat)
+                [ -n "$temp_message" ] && message="$temp_message" && break
+                [ -n "$message" ] && break
+            done
+            git commit -m "$message"
+            echo_c -c "(Keep, press 'Enter'. Clean, press 'Space'.)"
+            while true
+            do
+                read -p "> (should not contain spaces.) commit topic: " temp_topic
+                [ -n "$temp_topic" ] && topic="$temp_topic" && break
+                [ -n "$topic" ] && break
+            done
+        } || git show --stat
+        if ret=$(get_current_branch); then
+            current_branch="$ret"
+        else
+            echo "$ret"
+        fi
+        echo "Branch: "$current_branch
+        [ -n "$current_branch" ] && branch="$current_branch"
+        unset enter
+        read -p "$(echo_c -g '\nbranch: '"$branch"'\n'Confirm the submit:Y/N? or modify submit branch:M?): " enter
+        [[ $enter = 'Q' || $enter = 'q' ]] && exit 0
+        [[ $enter = 'M' ]] && {
+            read -p "new branch name: " bn_enter
+            branch=$bn_enter
+            enter=Y
+        }
+        [[ $enter = 'Y' ]] && {
+            git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $DOT_DIT/push.log
+        }
+        cd - >/dev/null
+    done
+    return 0
 }
 function dit-stash {
     echo $(date)" : \$$_EXEC_PARAMS" >.$script_name/$REPO_STASH
@@ -2764,6 +2925,14 @@ function dit-cp {
             print (NF >= 2) ? $2 : $0
         }' $PROCESS_RESULT) 
         readarray -t code_path <<<$code_path
+        [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
+            local branch=$(grep branch .$script_name/$CODE_INFO |cut -d' ' -f2)
+            printf "%s\n" "${code_path[@]}" >squash_commit.dir.temp
+            awk '{count[$0]++} END {for (line in count) if (count[line] > 1) print line}' squash_commit.dir.temp |sort -u >$SQUASH_DIR
+            squash_commit_create_branch $branch squash_commit.dir
+            mv $SQUASH_DIR .$script_name
+            rm -rf squash_commit.dir.temp
+        }
         grep -w "open:" $SSH_GET >.$script_name/cp_project_open.tmp 
         readarray -t commit_opens < <(awk -F ":" '{print $2}' .$script_name/cp_project_open.tmp)
         grep -w -n "status:" $SSH_GET >.$script_name/cp_project_status.tmp 
@@ -2774,7 +2943,7 @@ function dit-cp {
         readarray -t commit_refs <<<$commit_refs
         grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.tmp 
         readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.tmp)
-        echo "$"$do_cmd" "$last_cmd"  @"$(date) >.$script_name/$CP_LOG
+        echo "$"$do_cmd" "$arg2" "$arg3"  @"$(date) >.$script_name/$CP_LOG
         local cp_num=0
         for ((index = ${#link_code_path[@]} - 1; index >= 0 ; index--))
         do
@@ -2797,7 +2966,7 @@ function dit-cp {
                         echo -e "\n[$cp_num] - project: "$link" - "$refs
                         echo "@Describe: " $subject
                         echo "status: "$status "  "$private
-                        if [ $last_cmd = "--force" ]; then
+                        if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                             : 
                         else
                             read -p "Confirm the use of this code [Y/n]: " input
@@ -2809,7 +2978,7 @@ function dit-cp {
                 echo -e "\n[$cp_num] - project: "$link" - "$refs
                 echo "@Describe: " $subject
                 echo "status: "$status
-                if [ $last_cmd = "--force" ]; then
+                if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                     : 
                 else
                     read -p "Confirm the use of this code [Y/n]: " input
@@ -2822,7 +2991,19 @@ function dit-cp {
             [[ $path =~ 'firmware/Bluebox' ]] && path="framework/bluebox"
             cd $path
             echo -e "\n[$cp_num] -"${project_dir[index]}
-            git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/$link $refs && git cherry-pick FETCH_HEAD |tee -a $DOT_DIT/$CP_LOG
+            (git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/$link $refs && git cherry-pick FETCH_HEAD) 2>&1 |tee -a $DOT_DIT/$CP_LOG
+            status=${PIPESTATUS[0]}
+            if [ $status -ne 0 ]; then
+                echo_c -y "cherry-pick Conflict or Failure" |tee -a $DOT_DIT/$CP_LOG
+                [[ ${EXEC_PARAMS[@]} =~ '--test' ]] && git cherry-pick --abort
+                [[ ${EXEC_PARAMS[@]} =~ '--interact' ]] && {
+                    while true
+                    do
+                        read -p "To continue press Y: " input
+                        [ $input = 'Y' ] && echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG && break
+                    done
+                }
+            fi
             cd - >/dev/null
         done
         [ ! -f $DOT_DIT/$CP_HISTORY_LOG ] && touch $DOT_DIT/$CP_HISTORY_LOG
@@ -3986,7 +4167,7 @@ function END {
             [ $reval -gt $boundary ] && (echo -e "\n\e[41mERROR!\e[0m"; prompt_tone -1 &)
         }
     }
-    [ $last_cmd = '?' ] || rm -f $DOT_DIT/*.tmp
+    [[ $last_cmd = '?' ]] || rm -f $DOT_DIT/*.tmp
     exit 0
 }
 function main {
