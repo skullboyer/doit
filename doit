@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Sep  5 11:05:38 CST 2025 by skull  ver:25.9.5.11.05
+#@create:Mon Sep 15 20:49:09 CST 2025 by skull  ver:25.9.15.20.49
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -18,25 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 set +e
-
-echo_c() {
-    local color="$1"
-    local text="$2"
-
-    case "$color" in
-        -bk|black)  color_code="30" ;;
-        -r|red)     color_code="31" ;;
-        -g|green)   color_code="32" ;;
-        -y|yellow)  color_code="33" ;;
-        -b|blue)    color_code="34" ;;
-        -p|purple)  color_code="35" ;; 
-        -c|cyan)    color_code="36" ;; 
-        -w|white)   color_code="37" ;;
-        *)          color_code="39" ;; 
-    esac
-
-    echo -e "\033[1;${color_code}m${text}\033[0m"
-}
 
 error_handler() {
 
@@ -162,15 +143,16 @@ $script_name diff [-p] [-v] [-i] [-a] [-c] [-x] [--suffix] [--exclude] [--path] 
     tips:               缺省则检查仓内默认格式c/cc/cpp/h文件修改情况，同时将结果写入文件$REPO_DIFF
 
 处理代码仓暂存
-$script_name stash [-a] [-d] [-ad] [-v] [-vv] [-av] [-m]
+$script_name stash [-a] [-d] [--apply-drop] [-v] [--view-summary] [--view-detail] [-s] [-m]
     -a  apply           应用贮藏修改
     -d  drop            丢弃贮藏修改
-    -ad -a && -d        弹出贮藏修改
+    --apply-drop        弹出贮藏修改
     -v  view            查看贮藏修改
-    -vv view verbose    查看文件级别修改
-    -av view detail     查看具体修改内容，结果存于$REPO_STASH_DIFF
-    -m  messge          贮藏diff命令查询到修改
-    tips:               上述选项之后可加comment来划定范围，执行结果写入文件$REPO_STASH，缺省则查看最近一周内暂存
+    --view-summary      查看文件级别修改
+    --view-detail       查看具体修改内容，结果存于$REPO_STASH_DIFF
+    -s  save            贮藏diff命令查询到修改
+    -m  messge          贮藏的注释（支持关键字匹配），可限定上述选项的执行范围
+    tips:               执行结果写入文件$REPO_STASH，缺省则查看最近一周内暂存
 
 查询代码仓日志信息
 $script_name query [-f] [-p] [--depth] [--author] [--message] [--push]
@@ -418,7 +400,22 @@ read_dir=/mnt/d/work/code
 dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
 [ -f $HOME/.$script_name/signature.path ] && sig_file=$(<$HOME/.$script_name/signature.path) || sig_file="$sign_file_path/sign.pem"
-NEGATIVE_BOUNDARY=250
+echo_c() {
+    local color="$1"
+    local text="$2"
+    case "$color" in
+        -bk|black)  color_code="30" ;;
+        -r|red)     color_code="31" ;;
+        -g|green)   color_code="32" ;;
+        -y|yellow)  color_code="33" ;;
+        -b|blue)    color_code="34" ;;
+        -p|purple)  color_code="35" ;; 
+        -c|cyan)    color_code="36" ;; 
+        -w|white)   color_code="37" ;;
+        *)          color_code="39" ;; 
+    esac
+    echo -e "\033[1;${color_code}m${text}\033[0m"
+}
 escape_for_grep() {
     local input="$1"
     local escaped
@@ -487,6 +484,17 @@ pulse_diagnosis() {
         shift 2
         log "$@" "at line:${BASH_LINENO[0]}"
     }
+}
+check_last_cmd() {
+    local ret=$?                               
+    local threshold=${NEGATIVE_BOUNDARY:-250}  
+    local msg="$1"                             
+    if [[ $ret -lt $threshold ]]; then
+        return 0
+    else
+        [[ -n "$msg" ]] && echo_c -r "❌ $msg (ret=$ret)" >&2
+        return 1
+    fi
 }
 contains_element() {
     local element match="$1"
@@ -615,6 +623,23 @@ stop_spin() {
     [ $pid -eq 0 ] && return
     kill $pid > /dev/null 2>&1
     echo "$@"
+}
+compare_version() {
+    local v1="$1"
+    local v2="$2"
+    IFS='.' read -r -a a1 <<< "$v1"
+    IFS='.' read -r -a a2 <<< "$v2"
+    local len=$(( ${#a1[@]} > ${#a2[@]} ? ${#a1[@]} : ${#a2[@]} ))
+    for ((i=0; i<len; i++)); do
+        local n1=${a1[i]:-0}
+        local n2=${a2[i]:-0}
+        if ((n1 > n2)); then
+            return 1
+        elif ((n1 < n2)); then
+            return 2
+        fi
+    done
+    return 0 
 }
 handle_history_file_order() {
     local handle_history=$DOT_DIT/$HANDLE_HISTORY
@@ -1165,6 +1190,7 @@ get_option_index_and_value() {
 parse_options() {
     local option_count=0
     local option="$1"
+    local tips="$2"
     local -a values=()
     local -a indices=()
     local args=("${EXEC_PARAMS[@]}")
@@ -1183,7 +1209,7 @@ parse_options() {
                     ((option_count++))
                     ((i++)) 
                 else
-                    echo_c yellow "Warning: Option $option requires a non-empty value." >&2
+                    [[ $tips = '?' ]] && echo_c yellow "Option: $option. requires a non-empty value" >&2
                     return -1
                 fi
                 ;;
@@ -1196,7 +1222,7 @@ parse_options() {
         echo "Values: ${OPTION_VALUE[*]}"
     fi
     [[ $option_count -eq 0 ]] && {
-        echo_c yellow "Warning: Option $option unknown." >&2
+        [[ $tips = '?' ]] && echo_c yellow "Warning: Option $option unknown." >&2
         return -2
     }
     return $option_count
@@ -1452,7 +1478,9 @@ function dit-sync {
     fi
     if hit_option '--repo'; then
         parse_options --repo
-        [[ $? -gt $NEGATIVE_BOUNDARY ]] && return 1
+        if ! check_last_cmd; then
+            return 1
+        fi
         [[ ${OPTION_VALUE[@]} =~ 'xml' ]] && git -C .repo/manifests reset --hard HEAD~$depth
         [[ ${OPTION_VALUE[@]} =~ 'all' ]] && {
             git_fallback $depth
@@ -2177,7 +2205,9 @@ prompt="
                     ;;
                 S)
                     [ ! $branch ] && bt=$input && input=I && continue
-                    read -p "Enter the commit ID to be pushed: " commit_id
+                    read -p "Enter the commit ID to be pushed (press F to find): " commit_id
+                    [[ -z $commit_id ]] && continue
+                    [[ $commit_id = 'F' ]] && input='L' && continue
                     local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
                     git branch origin_single_push
                     git checkout -b single_push origin/$remote_branch
@@ -2342,51 +2372,62 @@ function dit-stash {
         " |tee -a .$script_name/$REPO_STASH
         return
     }
-    [ $arg2 = "$last_cmd" ] && last_cmd=.
-    [[ $arg2 = '-a' || $arg2 = '-ad' ]] && {
+    local comment="."
+    parse_options -m
+    if check_last_cmd; then
+        comment="$OPTION_VALUE"
+    fi
+    if hit_option '-a' || hit_option '--apply-drop'; then
         anser='Y'
-        repo forall -p -c "git stash list |grep "$last_cmd""
+        repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
         read -p "\$ Confirm stash apply above Y/N: " anser
         echo -e "\n\n"$split_line >>.$script_name/$REPO_STASH
         [[ $anser && $anser = 'Y' ]] && {
-            repo forall -p -c "git stash list |grep "$last_cmd" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a .$script_name/$REPO_STASH
+            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a .$script_name/$REPO_STASH
         }
-    }
-    [[ $arg2 = '-d' || $arg2 = '-ad' ]] && {
-        repo forall -p -c "git stash list |grep "$last_cmd""
+        if ! hit_option '-d' || ! hit_option '--apply-drop' ]]; then
+            return
+        fi
+    fi
+    if hit_option '-d' || hit_option '--apply-drop'; then
+        repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
         read -p "\$ Confirm stash drop all Y/N: " anser
         [[ $anser && $anser = 'Y' ]] && {
-            repo forall -p -c "git stash list |grep "$last_cmd" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a .$script_name/$REPO_STASH
+            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a .$script_name/$REPO_STASH
         }
-    }
+        return
+    fi
     [ $arg2 = '-v' ] && {
-        repo forall -p -c "git stash list |grep "$last_cmd"" |tee -a .$script_name/$REPO_STASH
+        repo forall -p -c "git stash list |grep "$comment"" |tee -a .$script_name/$REPO_STASH
+        return
     }
-    [ $arg2 = '-vv' ] && {
+    [ $arg2 = '--view-summary' ] && {
         repo forall -p -c "{
-            brief=\$(git stash list --format=\"%gd|%at|%s\" --date=iso |grep "$last_cmd")
-            index=\$(git stash list |grep "$last_cmd" |cut -d ':' -f1)
+            brief=\$(git stash list --format=\"%gd|%at|%s\" --date=iso |grep "$comment")
+            index=\$(git stash list |grep "$comment" |cut -d ':' -f1)
             [ \$index ] && echo \$brief && git stash show \$index
         }" |tee -a .$script_name/$REPO_STASH
+        return
     }
-    [ $arg2 = '-av' ] && {
+    [ $arg2 = '--view-detail' ] && {
         repo forall -p -c "{
-            index=\$(git stash list |grep "$last_cmd" |cut -d ':' -f1)
+            index=\$(git stash list |grep "$comment" |cut -d ':' -f1)
             [ \$index ] && echo ":"\$index && git show \$index
         }" >>.$script_name/$REPO_STASH_DIFF
+        return
     }
-    [ $arg2 = '-m' ] && {
+    [ $arg2 = '-s' ] && {
         grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.tmp
         read -p "\$ Confirm stash above all Y/N: " anser
         [[ ! $anser || ($anser != 'N' && $anser != 'Y') ]] && echo "!!Invalid input" && return 1
         [ $anser = 'Y' ] && ansersub='Y'
-        [ "$last_cmd" = '.' ] && {
+        [ "$comment" = '.' ] && {
             while :
             do
-                read -p "\$ Please input stash annotation: " last_cmd
-                [ -n "$last_cmd" ] && break
+                read -p "\$ Please input stash annotation: " comment
+                [ -n "$comment" ] && break
             done
         }
         grep -w "^project" .$script_name/stash_project.tmp >.$script_name/stash_path_project.tmp
@@ -2396,7 +2437,7 @@ function dit-stash {
         do
             cd $path
             [ $anser = 'N' ] && git status && read -p "\$ Confirm stash this Y/N: " ansersub
-            [ $ansersub = 'Y' ] && git stash push -m "$last_cmd" |tee -a $DOT_DIT/$REPO_STASH
+            [ $ansersub = 'Y' ] && git stash push -m "$comment" |tee -a $DOT_DIT/$REPO_STASH
             cd - >/dev/null
         done
         echo "Stash Complete!"
@@ -2705,7 +2746,7 @@ function dit-cp {
         return 0
     }
     [ $arg2 = "--merge" ] && {
-        [ ! -s .$script_name/$CP_FAIL ] && echo "! Please execute the --fail option first" && return 1
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' >.$script_name/$CP_FAIL
         readarray -t projects < <(grep "^project" .$script_name/$CP_FAIL |cut -d ' ' -f2)
         for project in "${projects[@]}"; do
             echo_c blue "\n  $project\n"
@@ -4027,8 +4068,10 @@ function define_complete {
                     }
                     print result
                 }')
-        fi
-        if [[ ! "\$arg" =~ "\${COMP_WORDS[COMP_CWORD]}" ]] ;then
+            if [[ ! "\$arg" =~ "\${COMP_WORDS[COMP_CWORD]}" ]] ;then
+                arg=\$(grep -w "^\\\$script_name \${COMP_WORDS[1]}" \${${script_name}_path} |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+            fi
+        else
             arg=''
         fi
         if [[ -z "\$arg" ]]; then
@@ -4101,7 +4144,8 @@ function dit-update {
     LATEST_VERSION=$(curl -s "$VERSION_URL")
     [ $last_cmd = '?' ] && echo "new: "$LATEST_VERSION
     [ $last_cmd = '?' ] && echo "now: "$CURRENT_VERSION
-    if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+    compare_version $LATEST_VERSION $CURRENT_VERSION
+    if [[ $? -eq 1 ]]; then
         read -p "New version available: updated? [Y/n]: " input
         [[ $input != 'Y' ]] && return 1
         echo "Updating..."
