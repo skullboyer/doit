@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Sep 19 11:30:11 CST 2025 by skull  ver:25.9.19.11.30
+#@create:Fri Sep 19 11:44:00 CST 2025 by skull  ver:25.9.19.11.43
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -3988,12 +3988,12 @@ function dit-hello {
     echo $add_env_path >>$env_name
     echo "name "$script_name
     [[ $script_name != dit && -d $script_exe_path ]] && {
-        echo "name "$script_name && exit 0
         rm -rf $script_exe_path
         mkdir $script_exe_path
         cp $script $script_exe_path
+        chmod +x $script_exe_path
     }
-    $script comple -p $HOME -w
+    $script comple -p $script_exe_path -w
     dircfg -p $CFG_IN_DIR
     $script cfg --signature
     return 0
@@ -4088,11 +4088,11 @@ complete -F define_complete $script_name
 EOF
     [ $? = 0 ] && echo -e "\n\e[32mThe completion file is created successfully!\e[0m"
     [[ ${EXEC_PARAMS[@]} =~ '-w' ]] && {
-        add_env_path="source $comple_path/.$script_name/$comple_file"
+        add_env_path="source $comple_path/$comple_file"
         escape_str=`echo $add_env_path |sed 's#\/#\\\/#g'`
         sed -i '/'^"$escape_str"$'/d' ~/.bashrc
         echo $add_env_path >> ~/.bashrc && source ~/.bashrc
-        chmod 777 $comple_path/.$script_name/$comple_file
+        chmod 777 $comple_path/$comple_file
         echo -e "Please execute \e[43msource ~/.bashrc\e[0m"
     }
     return 0
