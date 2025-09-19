@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Sep 19 11:10:26 CST 2025 by skull  ver:25.9.19.11.10
+#@create:Fri Sep 19 11:22:18 CST 2025 by skull  ver:25.9.19.11.22
 # Copyright © 2024 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -3993,9 +3993,9 @@ function dit-hello {
         mkdir $script_exe_path
         cp $script $script_exe_path
     }
-    $script-comple -p $HOME -w
+    $script comple -p $HOME -w
     dircfg -p $CFG_IN_DIR
-    $script-cfg --signature
+    $script cfg --signature
     return 0
 }
 function get_script_path {
