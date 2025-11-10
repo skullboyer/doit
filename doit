@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Nov 10 10:42:55 CST 2025 by skull  ver:25.11.10.10.42
+#@create:Mon Nov 10 15:03:24 CST 2025 by skull  ver:25.11.10.15.03
 # Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -3274,7 +3274,7 @@ function dit-cp {
             local refs=${commit_refs[index]}
             local path=${code_path[index]}
             local subject=${commit_subject[index]}
-            if [[ $open =~ "true" ]] && hit_option "--select"; then
+            if [[ $open =~ "true" ]] && ! hit_option "--select"; then
                 local line_num=${commit_status_line[index]}
                 local range=5
                 local start_line=$((line_num - range))
