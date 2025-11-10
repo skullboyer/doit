@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-#@create:Fri Sep 19 11:44:00 CST 2025 by skull  ver:25.9.19.11.43
-# Copyright © 2024 <copyright skull.gu@gmail.com>
+#@create:Mon Nov 10 10:42:55 CST 2025 by skull  ver:25.11.10.10.42
+# Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 # and associated documentation files (the “Software”), to deal in the Software without
@@ -29,6 +29,7 @@ error_handler() {
 
 exit_handler() {
     stop_spin "exit."
+    terminal_make
     exit 0
 }
 
@@ -43,7 +44,7 @@ script_name=$(basename "${BASH_SOURCE[0]%.*}")
 function help_info {
 cat <<EOFHELP
 *****************************************************************************************
-** 如果是第一次使用，请在本文件所在目录使用命令 './dit hello，根据提示操作即可 ©skull  **
+** 首次使用本脚本，请在脚本文件所在路径下执行命令 ./dit hello，根据提示操作即可 ©skull **
 *****************************************************************************************
 
 usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
@@ -203,6 +204,7 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [-
     -m                  支持同步的提交信息change-number、change-id、commit-hash、topic、hashtag
                             缺省则对非NEW状态的提交进行选择，提交状态：ABANDONED、MERGED、NEW
         --force             强制同步指定的所有提交
+        --select            选择应用提交
         --count             统计代码的修改行数，不应用修改
         --squash            为压缩提交准备好分支，一般与选项 interact 一起使用
         --interact          交互式同步，冲突时待解决后继续
@@ -271,8 +273,8 @@ $script_name tools [map] [crc] [display] [owner] [commit]
         -v                  同时在终端输出相关信息
         tips:               缺省则在原文副本添加owner
     commit              查询提交数量
-        {user-name}         提交人名，缺省为自己
-        {status}            提交代码状态
+        --name              提交人名，缺省为自己
+        --state             提交代码状态
         --dedup             去除cherry-pick的提交
 
 创建配置文件
@@ -335,6 +337,7 @@ arg_count=$#
 _EXEC_PARAMS=$@
 
 EXEC_PARAMS=("$@")
+
 current_path=`pwd`
 BUILD_TYPE=release
 version=`date +"%y.%-m.%-d.%-H.%M"`
@@ -389,10 +392,12 @@ REPO_STASH="repo.stash"
 REPO_STASH_DIFF="repo.stash.diff"
 QUERY_LOG="query.log"
 HANDLE_HISTORY="handle.history"
-MAKE_MENU="make.product"
+MAKE_MENU=$DOT_DIT"/make.product"
 CHANGELOG_OUT=$DOT_DIT"/changelog_out"
 BRANCH_RESULT="branch.txt"
 SQUASH_DIR="squash_commit.dir"
+DECONFIG_ORIGIN_VER=$DOT_DIT"/origin.version"
+DECONFIG_PATH=$DOT_DIT"/deconfig.path"
 source_dir='build/out/watch@*/binary'
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
@@ -400,7 +405,7 @@ read_dir=/mnt/d/work/code
 dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
 [ -f $HOME/.$script_name/signature.path ] && sig_file=$(<$HOME/.$script_name/signature.path) || sig_file="$sign_file_path/sign.pem"
-echo_c() {
+echo_cc() {
     local color="$1"
     local text="$2"
     case "$color" in
@@ -415,6 +420,91 @@ echo_c() {
         *)          color_code="39" ;; 
     esac
     echo -e "\033[1;${color_code}m${text}\033[0m"
+}
+echo_c() {
+    local fg_color="" bg_color="" text=""
+    for arg in "$@"; do
+        case "$arg" in
+            -bk|black)              fg_color="30" ;; 
+            -r|red)                 fg_color="31" ;; 
+            -g|green)               fg_color="32" ;; 
+            -y|yellow)              fg_color="33" ;; 
+            -b|blue)                fg_color="34" ;; 
+            -p|purple|-m|magenta)   fg_color="35" ;; 
+            -c|cyan)                fg_color="36" ;; 
+            -w|white)               fg_color="37" ;; 
+            -gry|gray|grey)         fg_color="90" ;; 
+            -br|bright-red)         fg_color="91" ;; 
+            -bg|bright-green)       fg_color="92" ;; 
+            -by|bright-yellow)      fg_color="93" ;; 
+            -bb|bright-blue)        fg_color="94" ;; 
+            -bp|bright-purple)      fg_color="95" ;; 
+            -bc|bright-cyan)        fg_color="96" ;; 
+            -bw|bright-white)       fg_color="97" ;; 
+            -bg-black)              bg_color="40" ;; 
+            -bg-red)                bg_color="41" ;; 
+            -bg-green)              bg_color="42" ;; 
+            -bg-yellow)             bg_color="43" ;; 
+            -bg-blue)               bg_color="44" ;; 
+            -bg-purple|-bg-magenta) bg_color="45" ;; 
+            -bg-cyan)               bg_color="46" ;; 
+            -bg-white)              bg_color="47" ;; 
+            -bg-gray|-bg-grey)      bg_color="100" ;; 
+            -bg-bright-red)         bg_color="101" ;; 
+            -bg-bright-green)       bg_color="102" ;; 
+            -bg-bright-yellow)      bg_color="103" ;; 
+            -bg-bright-blue)        bg_color="104" ;; 
+            -bg-bright-purple)      bg_color="105" ;; 
+            -bg-bright-cyan)        bg_color="106" ;; 
+            -bg-bright-white)       bg_color="107" ;; 
+            *) text="${text}${arg} " ;;
+        esac
+    done
+    local color_code=""
+    [[ -n "$fg_color" ]] && color_code="\033[1;${fg_color}m"  
+    [[ -n "$bg_color" ]] && color_code="${color_code}\033[${bg_color}m" 
+    echo -e "${color_code}${text}\033[0m"
+}
+test_echo_c() {
+    echo "========== 基础前景色测试 =========="
+    echo_c -bk "黑色文字 (black)"
+    echo_c -r  "红色文字 (red)"
+    echo_c -g  "绿色文字 (green)"
+    echo_c -y  "黄色文字 (yellow)"
+    echo_c -b  "蓝色文字 (blue)"
+    echo_c -p  "紫色文字 (purple)"
+    echo_c -c  "青色文字 (cyan)"
+    echo_cc -w  "白色文字 (white)"
+    echo ""
+    echo "========== 亮色前景测试 =========="
+    echo_c -gry "深灰文字 (gray)"
+    echo_c -br  "亮红文字 (bright red)"
+    echo_c -bg  "亮绿文字 (bright green)"
+    echo_c -by  "亮黄文字 (bright yellow)"
+    echo_c -bb  "亮蓝文字 (bright blue)"
+    echo_c -bp  "亮紫文字 (bright purple)"
+    echo_c -bc  "亮青文字 (bright cyan)"
+    echo_c -bw  "亮白文字 (bright white)"
+    echo ""
+    echo "========== 背景色测试 =========="
+    echo_c -w -bg-red    "白字红底"
+    echo_c -y -bg-blue   "黄字蓝底"
+    echo_c -r -bg-green  "红字绿底"
+    echo_c -g -bg-purple "绿字紫底"
+    echo_c -b -bg-yellow "蓝字黄底"
+    echo_c -w -bg-cyan   "白字青底"
+    echo ""
+    echo "========== 亮背景测试 =========="
+    echo_c -bk -bg-bright-yellow "黑字亮黄底"
+    echo_c -br -bg-bright-white  "亮红字亮白底"
+    echo_c -by -bg-bright-blue   "亮黄字亮蓝底"
+    echo_c -bp -bg-bright-cyan   "亮紫字亮青底"
+    echo ""
+    echo "========== 混合 & 特殊字符测试 =========="
+    echo_c -by -bg-purple "警告: Disk almost full!"
+    echo_c -br -bg-gray "错误: 无法连接服务器!"
+    echo_c -bg "成功: 文件已保存 ✅"
+    echo_c -c "提示: 请按 Enter 继续..."
 }
 escape_for_grep() {
     local input="$1"
@@ -462,10 +552,19 @@ logF() {
 log() {
     echo -e "$(date '+%H:%M:%S.%3N') $@"
 }
+log_i() {
+    echo -e "I> $(date '+%H:%M:%S.%3N') $@"
+}
+log_w() {
+    echo_c -y "W> $(date '+%H:%M:%S.%3N') $@"
+}
+log_e() {
+    echo_c -r "E> $(date '+%H:%M:%S.%3N') $@"
+}
 log_assert() {
     [ $1 -ne 0 ] && {
         shift
-        log "$@" "at line:${BASH_LINENO[0]}"
+        log_e "$@" "at line:${BASH_LINENO[0]}"
     }
 }
 diagnose_cmd() {
@@ -482,7 +581,7 @@ pulse_diagnosis() {
     content=$2
     [ "$content" = "$target" ] && {
         shift 2
-        log "$@" "at line:${BASH_LINENO[0]}"
+        log_w "$@" "at line:${BASH_LINENO[0]}"
     }
 }
 check_last_cmd() {
@@ -641,6 +740,86 @@ compare_version() {
     done
     return 0 
 }
+is_number() {
+    local input=$1
+    if [[ $input =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        return 0 
+    else
+        return 1 
+    fi
+}
+convert_iso8601_time() {
+    local input="$1"
+    local result
+    case "$input" in
+        *y)
+            local val=${input%y}
+            result=$(date -d "$val year ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *m)
+            local val=${input%m}
+            result=$(date -d "$val month ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *w)
+            local val=${input%d}
+            result=$(date -d "$val week ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *d)
+            local val=${input%d}
+            result=$(date -d "$val day ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *h)
+            local val=${input%h}
+            result=$(date -d "$val hour ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *mm)
+            local val=${input%mm}
+            result=$(date -d "$val minute ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *s)
+            local val=${input%s}
+            result=$(date -d "$val second ago" "+%Y-%m-%d %H:%M:%S")
+            ;;
+        *)
+            echo_c -r "Invalid format: $input"
+            return 1
+            ;;
+    esac
+    echo "$result"
+}
+convert_iso8601_date() {
+    local input="$1"
+    local result
+    case "$input" in
+        *y)
+            local val=${input%y}
+            result=$(date -d "$val year ago" "+%Y-%m-%d")
+            ;;
+        *m)
+            local val=${input%m}
+            result=$(date -d "$val month ago" "+%Y-%m-%d")
+            ;;
+        *w)
+            local val=${input%d}
+            result=$(date -d "$val week ago" "+%Y-%m-%d")
+            ;;
+        *d)
+            local val=${input%d}
+            result=$(date -d "$val day ago" "+%Y-%m-%d")
+            ;;
+        *)
+            echo_c -r "Invalid format: $input"
+            return 1
+            ;;
+    esac
+    echo "$result"
+}
+terminal_make() {
+    [ ! -f $DECONFIG_PATH ] && return
+    origin_version=$(< $DECONFIG_ORIGIN_VER)
+    config_path=$(< $DECONFIG_PATH)
+    sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$origin_version'"' $current_path/$config_path
+}
 handle_history_file_order() {
     local handle_history=$DOT_DIT/$HANDLE_HISTORY
     [ ! -d $DOT_DIT ] && mkdir $DOT_DIT
@@ -652,6 +831,7 @@ handle_history_file_order() {
             tac $handle_history >handle_history.tmp
             echo $(date)" : \$$_EXEC_PARAMS " >>handle_history.tmp
             tac handle_history.tmp >$handle_history
+            rm handle_history.tmp
             ;;
         FIFO)
             echo $(date)" : \$${EXEC_PARAMS[@]} " >>$handle_history
@@ -660,6 +840,7 @@ handle_history_file_order() {
             tac $handle_history >handle_history.tmp
             echo $(date)" : \$$_EXEC_PARAMS " >>handle_history.tmp
             tac handle_history.tmp >$handle_history
+            rm handle_history.tmp
             ;;
     esac
 }
@@ -1080,42 +1261,39 @@ EOF
     echo "cfg save done!"
 }
 update_product_list() {
-    local input_file=".$script_name/$MAKE_MENU"
+    local input_file="$MAKE_MENU"
     [ ! -f $input_file ] && return
     local query_string="$1"
     local max_lines=9
     local temp_file="$(mktemp)"
     local sorted_temp_file="$(mktemp)"
-    while IFS=' ' read -r string frequency; do
+    while IFS=' ' read -r string frequency _; do
+        local activated_product=""
         if [[ "$string" == "$query_string" ]]; then
             ((frequency++)) 
+            activated_product="<-"
         fi
-        printf "%s %d\n" "$string" "$frequency" >> "$temp_file" 
+        printf "%s %d%s\n" "$string" "$frequency" "${activated_product:+ $activated_product}" >> "$temp_file" 
     done < "$input_file"
     sort -rn -k2 "$temp_file" > "$sorted_temp_file"
     if ! grep -q "^$query_string " "$sorted_temp_file"; then
         head -n "$max_lines" "$sorted_temp_file" > "$temp_file"
-        printf "%s 1\n" "$query_string" >> "$temp_file"
+        printf "%s 1 <-\n" "$query_string" >> "$temp_file"
         mv "$temp_file" "$input_file"
     else
         mv "$sorted_temp_file" "$input_file"
     fi
 }
 get_current_branch() {
-    local branch=$(git rev-parse --abbrev-ref HEAD)
-    [[ -n $branch ]] && {
-        [[ $branch = "HEAD" || $branch = "default" ]] && {
-            branch=$(git rev-parse HEAD |xargs git branch -r --contains |grep "\->" |awk -F "->" '{print $2}' |xargs)
-        }
-        [ -z "$branch" ] && {
-            local cnt=1
-            while true; do
-                branch=$(git rev-parse HEAD~$cnt |xargs git branch -r --contains |grep "\->" |awk -F "->" '{print $2}' |xargs)
-                [ -n "$branch" ] && break
-                (( cnt++ ))
-                [ $cnt -gt 9 ] && break
-            done
-        }
+    local branch=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+    [ -z "$branch" ] && {
+        local cnt=1
+        while true; do
+            branch=$(git rev-parse HEAD~$cnt |xargs git branch -r --contains |grep "\->" |awk -F "->" '{print $2}' |xargs)
+            [ -n "$branch" ] && break
+            (( cnt++ ))
+            [ $cnt -gt 9 ] && break
+        done
     }
     [ -n "$branch" ] && {
         local br_num=$(echo "$branch" |grep origin |wc -l)
@@ -1126,6 +1304,7 @@ get_current_branch() {
         }
         echo "Maybe it helps: $branch"
     }
+    [ -z "$branch" ] && echo -y "!!Remote branch not found"
     return 1
 }
 get_active_map_remote_branch() {
@@ -1303,7 +1482,7 @@ count_code_line_from_gerrit() {
     echo "Total deletions : $total_deletions"
     local commit_msg_lines=10
     local commit_cnt=$(grep -w "^rowCount:" $file |cut -d ':' -f2)
-    echo "commit_cnt "$commit_cnt
+    echo "Commit count: "$commit_cnt
     echo "Code insertions: "$((total_insertions - commit_cnt * commit_msg_lines))
 }
 dollar_symbol() {
@@ -1325,7 +1504,7 @@ test_instance() {
 }
 function dit-clean {
     mv .$script_name/$HANDLE_HISTORY .
-    mv .$script_name/$MAKE_MENU .
+    mv $MAKE_MENU .
     rm -rf .$script_name
     mkdir .$script_name && mv $HANDLE_HISTORY .$script_name
     [ $last_cmd = '--all' ] && {
@@ -1569,11 +1748,20 @@ function dit-make {
         }
         cp $sig_file ./build
     }
+    if hit_option '-t'; then
+        [[ `pwd` =~ 'build' ]] || cd build
+        [ ! -f ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
+            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ../.$script_name/bak/$product/diff/watch@mimxrt595_ota_sign.zip
+        }
+        rm -rf sign.pem
+        return
+    fi
     [[ ${EXEC_PARAMS[@]} =~ '--skip' ]] || {
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
+            [ ! -f build/.config ] && echo_c -y "!!missing config" && return 1
             local platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}')
             echo -e "\n**platform: "$platform
-            if [ $platform = \"mhs003\" ]; then
+            if [ "$platform" = \"mhs003\" ]; then
                 sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mhs003/init/board_bsd.c
             elif [[ $platform =~ "mimxrt595" ]]; then
                 sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mimxrt595/board_bsd.c
@@ -1581,7 +1769,7 @@ function dit-make {
                 sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/apollo4/board_bsd.c
             fi
         else
-            [ -f .$script_name/$MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 .$script_name/$MAKE_MENU)
+            [ -f $MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_MENU)
             product_config
             update_product_list $config_select
             backup_firmware $config_select
@@ -1602,6 +1790,8 @@ function dit-make {
             deconfig=`find ../ -iname $config_select`
             local temp=$(mktemp)
             cp $deconfig $temp
+            echo ${deconfig#*/} >$DECONFIG_PATH
+            grep BOARD_FIRMWARE_VERSION $deconfig |cut -d '=' -f2 |tr -d '"' >$DECONFIG_ORIGIN_VER
             local deconfig_version=$(grep BOARD_FIRMWARE_VERSION $deconfig)
             sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$version'"' $deconfig
             make $config_select BUILD_TYPE=$debug_release BUILD_FW_VER=$version
@@ -1632,24 +1822,17 @@ function dit-make {
         fi
         local make_result=$?
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
-            if [ $platform = \"mhs003\" ]; then
+            if [ "$platform" = \"mhs003\" ]; then
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mhs003/init/board_bsd.c
-            elif [ $platform = \"mimxrt595\" ]; then
+            elif [ "$platform" = \"mimxrt595\" ]; then
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mimxrt595/board_bsd.c
             elif [[ $platform = "apollo4" ]]; then
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/apollo4/board_bsd.c
             fi
         else
             mv $temp $deconfig
-            sed -i '/BOARD_FIRMWARE_VERSION=/c'"$deconfig_version"'' $deconfig
         fi
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
-    }
-    [[ ${EXEC_PARAMS[@]} =~ '-t' ]] && {
-        [[ `pwd` =~ 'build' ]] || cd build
-        [ ! -f ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
-            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ../.$script_name/bak/$product/diff/watch@mimxrt595_ota_sign.zip
-        }
     }
     [[ ${EXEC_PARAMS[@]} =~ '--firware-ota' ]] && {
         [[ `pwd` =~ 'build' ]] || cd build
@@ -1824,7 +2007,7 @@ function dit-diff {
         apply_patch
         return $?
     }
-    echo "diff..."
+    echo_c -b "diff..."
     start_spin
     echo "$"$do_cmd" "$arg2"  @"$(date) >.$script_name/$REPO_DIFF
     [[ $arg2 = '--cp' ]] && {
@@ -1929,7 +2112,7 @@ function dit-diff {
     elif [[ $arg2 = '-a' ]]; then
         repo forall -p -c '
             if pwd |grep -iq "'"$path_keyword"'"; then
-                changed=$(git diff --name-only |grep -v "'"$file_exclude"'")
+                changed=$(git diff --name-only |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git status --porcelain |nl
                 fi
@@ -1938,7 +2121,7 @@ function dit-diff {
         echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
         repo forall -p -c '
             if pwd |grep -iq "'"$path_keyword"'"; then
-                changed=$(git diff --name-only |grep -v "'"$file_exclude"'")
+                changed=$(git diff --name-only |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git diff
                 fi
@@ -1964,8 +2147,9 @@ function dit-diff {
         echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-x' ]]; then
-        [ -z $type_special ] && type_special=".gapp"
-        repo forall -p -c 'if git status --porcelain |grep -Ev "\.('"$type_special"')$" >/dev/null; then git status; fi' |tee -a .$script_name/$REPO_DIFF
+        type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
+        [ -z $type_special ] && type_special="gapp"
+        repo forall -p -c 'if git diff --name-only |grep -vE "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
         echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
         unset file_exclude
     fi
@@ -1976,9 +2160,9 @@ function dit-diff {
             repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>.$script_name/$REPO_DIFF
             return 0
         }
-        echo -e "\n* exclude file: "$file_exclude "\n"
+        [ $last_cmd = '?' ] && echo -e "\n* exclude file: $(declare -p file_exclude)\n"
         repo forall -p -c '
-            changed=$(git diff --name-only | grep -E "'"$type_filter"'" | grep -v "'"$file_exclude"'")
+            changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
             if [ -n "$changed" ]; then
                 git diff --stat $changed
             fi
@@ -1987,14 +2171,14 @@ function dit-diff {
         [ $last_cmd = '?' ] && echo -e "\n> git diff -- "${type_filter_group[*]} ${file_exclude_diff[*]}
         [[ $arg2 = '-v' ]] && {
             repo forall -p -c '
-                changed=$(git diff --name-only | grep -E "'"$type_filter"'" | grep -v "'"$file_exclude"'")
+                changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git diff -- $changed
                 fi
             ' |tee -a .$script_name/$REPO_DIFF
         } || {
             repo forall -p -c '
-                changed=$(git diff --name-only | grep -E "'"$type_filter"'" | grep -v "'"$file_exclude"'")
+                changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git diff -- $changed
                 fi
@@ -2023,6 +2207,26 @@ function dit-commit {
     local reentry="no"
     local bt=""
     local bk=""
+    local repo_state=0
+prompt_help="
+*******************************************************************************************************
+  Y: 确认本次提交，输入提交信息，如分支、描述、Topic，然后推送到远端仓库
+  M: 挂载提交，将本次提交追加到gerrit上存在的指定的提交上去，会让你输入对应change-id
+  N: 跳过本次提交，即什么也不敢，保持本地不变
+  C: 追加提交，将本次修改追加到本地的上一笔提交，一般用来在同步到本地的提交上做修改
+  B: 修改提交分支，常用来不同仓推到不同分支上
+  A: 添加未跟踪文件，加入新增的文件
+  X: 排除文件，去掉本次提交的部分文件
+  V: 查看详细修改，确认本次提交修改的具体内容
+  I: 提交信息核查，如分支、描述、Topic
+  L: 查看提交历史，本地代码仓的提交描述历史
+  G: 生成新提交，用于将同步到本地的提交结合本地修改，作为新提交推送
+  O: 仅提交不推送，可再后续进行单笔提交，也可保证远端提交历史干净，或是切分支，或同步提交等
+  R: 完成解冲突状态，然后进行后续操作
+  S: 单笔推送，如本地有多笔未推送的提交，直接推送会将多笔都推送，该选项用来仅推送指定commit-id的提交
+  E: 清除选项参数
+  Q: 退出本次提交流程
+"
 prompt="
 -------------------------------------------------------------------------------------------------------
  (Y)confirm commit    (M)mount commit    (N)skip commit    (C)amend commit         (B)change branch
@@ -2190,6 +2394,7 @@ prompt="
                         break
                     done
                     git log -$depth
+                    input=$bt && continue
                     ;;
                 G)
                     [[ $bk = 'R' ]] || git commit --amend --no-edit
@@ -2210,9 +2415,73 @@ prompt="
                     [[ $commit_id = 'F' ]] && input='L' && continue
                     local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
                     git branch origin_single_push
-                    git checkout -b single_push origin/$remote_branch
+                    git diff --quiet && git diff --cached --quiet
+                    repo_state=$?
+                    if [ $repo_state -ne 0 ]; then
+                        git stash
+                    fi
+                    git checkout -b single_push --track origin/$remote_branch
                     git cherry-pick $commit_id
-                    bt=$input && input="push" && continue
+                    if [ $repo_state -ne 0 ]; then
+                        git stash apply
+prompt_single_push="
+************************************************************************************************************************
+ 'A' add file, 'X' exclude file, 'V' view status, 'C' confirm commit, 'L' last once , 'Q' quit and abort
+"
+                        while true
+                        do
+                            echo_c -c "$prompt_single_push"
+                            read -p "You choice: " choice
+                            case "$choice" in
+                                A)
+                                    git status -s
+                                    read -p " add untracked file: " untracked_file
+                                    git add $untracked_file
+                                    git status
+                                    ;;
+                                X)
+                                    git status -s
+                                    read -p " restore file: " restore_file
+                                    git restore --staged $restore_file
+                                    git status
+                                    ;;
+                                V)
+                                    git log -1
+                                    git status
+                                    ;;
+                                C)
+                                    if git ls-files -u | grep -q .; then
+                                        echo_c -y "Merge conflicts exist, need to resolve"
+                                        continue
+                                    fi
+                                    git commit --amend --no-edit
+                                    break
+                                    ;;
+                                L)
+                                    if git ls-files -u | grep -q .; then
+                                        echo_c -y "Merge conflicts exist, need to resolve"
+                                        continue
+                                    fi
+                                    git commit --amend --no-edit
+                                    git stash drop
+                                    repo_state=1
+                                    break
+                                    ;;
+                                Q)
+                                    git reset --hard
+                                    git checkout --detach origin_single_push
+                                    git branch -D single_push origin_single_push
+                                    git stash pop
+                                    unset input && break
+                                    ;;
+                                *)
+                                    echo_c -bg-white "$prompt_single_push"
+                                    ;;
+                            esac
+                        done
+                    fi
+                    [ -z "$input" ] && continue
+                    [ -n "$input" ] && bt=$input && input="push" && continue
                     ;;
                 R)
                     git add -u
@@ -2246,8 +2515,12 @@ prompt="
                             read -p "I think you should push this branch: $current_branch [Y/n]: " select
                             [ $select != 'Y' ] && {
                                 if [[ $bt = 'S' ]]; then
+                                    git reset --hard
                                     git checkout --detach origin_single_push
                                     git branch -D single_push origin_single_push
+                                    if [ $repo_state -ne 0 ]; then
+                                        git stash pop
+                                    fi
                                 else
                                     git reset HEAD^
                                 fi
@@ -2264,15 +2537,21 @@ prompt="
                         echo -e "- New Commit""\r\n" >>$temp_commit_log
                         git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
                         [[ $bt = 'S' ]] && {
+                            git reset --hard
                             git checkout --detach origin_single_push
                             git branch -D single_push origin_single_push
+                            if [ $repo_state -ne 0 ]; then
+                                git stash pop
+                            fi
+                            echo -e "\r\n" >> $temp_commit_log
+                            unset input && continue
                         }
                     fi
                     echo -e "\r\n" >> $temp_commit_log
                     break
                     ;;
                 *)
-                    echo -e "\e[47m\e[31m!!Please check the input\e[0m"
+                    echo "$prompt_help"
                     ;;
             esac
             bk=$temp_input
@@ -2995,7 +3274,7 @@ function dit-cp {
             local refs=${commit_refs[index]}
             local path=${code_path[index]}
             local subject=${commit_subject[index]}
-            if [[ $open =~ "true" ]]; then
+            if [[ $open =~ "true" ]] && hit_option "--select"; then
                 local line_num=${commit_status_line[index]}
                 local range=5
                 local start_line=$((line_num - range))
@@ -3010,7 +3289,7 @@ function dit-cp {
                         if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                             : 
                         else
-                            read -p "Confirm the use of this code [Y/n]: " input
+                            read -p "Confirm the use of this code [y/n]: " input
                             [[ $input != 'Y' ]] && echo "!! Abort" && continue
                         fi
                     }
@@ -3022,8 +3301,9 @@ function dit-cp {
                 if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                     : 
                 else
-                    read -p "Confirm the use of this code [Y/n]: " input
-                    [[ $input != 'Y' ]] && echo "!! Abort" && continue
+                    read -p "Confirm the use of this code, or abort the rest [y/n/q]: " input
+                    [[ $input = 'q' ]] && echo "!! Abort Rest" && break
+                    [[ $input != 'y' ]] && echo "!! Abort This" && continue
                 fi
             fi
             echo >>.$script_name/$CP_LOG
@@ -3036,8 +3316,8 @@ function dit-cp {
             status=${PIPESTATUS[0]}
             if [ $status -ne 0 ]; then
                 echo_c -y "cherry-pick Conflict or Failure" |tee -a $DOT_DIT/$CP_LOG
-                [[ ${EXEC_PARAMS[@]} =~ '--test' ]] && git cherry-pick --abort
-                [[ ${EXEC_PARAMS[@]} =~ '--interact' ]] && {
+                hit_option '--test' && git cherry-pick --abort
+                hit_option '--interact' && {
                     while true
                     do
                         read -p "To continue press Y: " input
@@ -3710,24 +3990,44 @@ function changelog_find_owner {
     return 0
 }
 commit_count_from_gerrit() {
-    local name=$arg3
-    [ -z $name ] && name=self
-    local state
-    [[ $arg4 != '--dedup' ]] && state=$arg4
-    [ -z $state ] && state="merged"
+    local name=self
+    if hit_option '--name'; then
+        parse_options --name
+        if ! check_last_cmd; then
+            return 1
+        fi
+        name="$OPTION_VALUE"
+    fi
+    local state=""
+    local query_expr="owner:\"$name\""
+    if hit_option '--status'; then
+        parse_options --status
+        if ! check_last_cmd; then
+            return 1
+        fi
+        state="$OPTION_VALUE"
+        query_expr="$query_expr status:\"$state\""
+    fi
     local start=0
     local commit_cnt=0
     local temp_file="$(mktemp)"
     local temp_file_dedup="$(mktemp)"
     local temp_file_number="$(mktemp)"
+    echo_c -c "All: Press Enter. N-days: Nd. N-weeks: Nw. N-month: Nm."
+    read -p "Enter the number of days you want to query: " days
+    if is_number ${days%?}; then
+        after_time=$(convert_iso8601_date $days)
+        query_expr="$query_expr after:\"$after_time\""
+    fi
+    [[ $last_cmd = '?' ]] && echo_c -y "$query_expr"
     echo "counting commit..."
     while true; do
-        ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $start >$temp_file
+        ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $start >$temp_file
         local tail_info=$(cat $temp_file |tail -n 5)
         local user_verify=$(echo $tail_info |awk '{print $2}' |xargs)
         [[ $user_verify = 'error' ]] && echo "!!No such person found" && return -1
         local temp_cnt=$(echo $tail_info |awk '{print $4}' |xargs)
-        if [ $last_cmd = '--dedup' ]; then
+        if hit_option '--dedup'; then
             grep -e number: -e cherryPickOfChange $temp_file >$temp_file_dedup
             awk '
             {
@@ -3766,18 +4066,23 @@ commit_count_from_gerrit() {
     local valid_commit_cnt=$(wc -l <$temp_file_number)
     rm $temp_file
     rm $temp_file_dedup
+    [[ $valid_commit_cnt -eq 0 ]] && {
+        rm $temp_file_number
+        echo_c -y "!!Nothing"
+        return 0
+    }
     if [[ $state = *-* ]]; then
-        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state |grep -m 1 'createdOn:' |awk -F 'createdOn:' '{print $2}' |xargs)
-        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state |grep -m 1 'lastUpdated:' |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr |grep -m 1 'createdOn:' |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr |grep -m 1 'lastUpdated:' |awk -F 'createdOn:' '{print $2}' |xargs)
     else
-        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
-        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
+        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
+        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
     fi
-    local first_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $((commit_cnt - 1)) |awk -F 'createdOn:' '{print $2}' |xargs)
-    local first_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query owner:$name status:$state --start $((commit_cnt - 1)) |awk -F 'lastUpdated:' '{print $2}' |xargs)
+    local first_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $((commit_cnt - 1)) limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
+    local first_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $((commit_cnt - 1)) limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
     echo "$name: $valid_commit_cnt / $commit_cnt"
-    echo "first date: "$first_create_date " "$first_update_date
-    echo "last date: "$last_create_date " "$last_update_date
+    echo "first date: "$first_create_date " ~ "$first_update_date
+    echo "last date: "$last_create_date " ~ "$last_update_date
     echo "counting code..."
     start_spin
     local cnt=0
@@ -3843,7 +4148,7 @@ function dit-cfg {
             reval=$?
             ;;
         --mk-product)
-            local output_file=".$script_name/$MAKE_MENU"
+            local output_file="$MAKE_MENU"
             [[ ${EXEC_PARAMS[@]} =~ '-d' ]] && rm $output_file
             [[ ${EXEC_PARAMS[@]} =~ '-e' ]] && >$output_file
             [ ! -f $output_file ] && {
@@ -4115,13 +4420,13 @@ VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
 UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
 function dit-update {
     CURRENT_VERSION=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
-    [[ ${EXEC_PARAMS[@]} =~ '-g' ]] && {
+    if hit_option '-g'; then
         cp ./out/release_dit ./release/doit
         echo $CURRENT_VERSION >./release/version
         echo "no care" >./release/upgrade
         [[ ${EXEC_PARAMS[@]} =~ '--force' ]] && echo "force" >./release/upgrade
         return 0
-    }
+    fi
     [ $1 = '-b' ] && {
         local check_date="$CFG_IN_DIR/update_check.date"
         if [ -f "$check_date" ]; then
