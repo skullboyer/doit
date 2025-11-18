@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Nov 10 15:03:24 CST 2025 by skull  ver:25.11.10.15.03
+#@create:Tue Nov 18 17:41:43 CST 2025 by skull  ver:25.11.18.17.41
 # Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -244,7 +244,7 @@ $script_name push [--depend] [--squash]
     --squash            压缩提交并推送，需配合 cp -m --squash
 
 工具集合
-$script_name tools [map] [crc] [display] [owner] [commit]
+$script_name tools [map] [crc] [display] [owner] [commit] [env]
     map                 解析各功能模块空间占用
         --parse  module     解析指定模块空间占用，后跟模块名
         --find  keyword     查看当前项目支持的指定关键字相关的模块，后跟模块关键字
@@ -276,6 +276,8 @@ $script_name tools [map] [crc] [display] [owner] [commit]
         --name              提交人名，缺省为自己
         --state             提交代码状态
         --dedup             去除cherry-pick的提交
+    env                 配置环境
+        --repo              更新repo版本
 
 创建配置文件
 $script_name cfg [--fw-dir] [--mk-product] [--signature] [--history] [--commit-editor]
@@ -2221,8 +2223,8 @@ prompt_help="
   I: 提交信息核查，如分支、描述、Topic
   L: 查看提交历史，本地代码仓的提交描述历史
   G: 生成新提交，用于将同步到本地的提交结合本地修改，作为新提交推送
-  O: 仅提交不推送，可再后续进行单笔提交，也可保证远端提交历史干净，或是切分支，或同步提交等
-  R: 完成解冲突状态，然后进行后续操作
+  O: 仅提交不推送，常用来将本次修改作为新提交，可在后续进行推送，亦可实现远端提交历史干净，或为了切分支，或再次同步提交等
+  R: 同步提交时产生冲突，冲突解决后，完成解冲突状态，然后进行后续操作
   S: 单笔推送，如本地有多笔未推送的提交，直接推送会将多笔都推送，该选项用来仅推送指定commit-id的提交
   E: 清除选项参数
   Q: 退出本次提交流程
@@ -2254,6 +2256,7 @@ prompt="
         git status
         branch=$arg3
         local no_push="no"
+        local commit_s_cmd=''
         while true
         do
             [ ! $input ] && {
@@ -2409,9 +2412,11 @@ prompt="
                     no_push="yes"
                     ;;
                 S)
-                    [ ! $branch ] && bt=$input && input=I && continue
-                    read -p "Enter the commit ID to be pushed (press F to find): " commit_id
-                    [[ -z $commit_id ]] && continue
+                    [[ -z $commit_s_cmd ]] && {
+                        echo_c -p "(press F to find, press Enter and empty as new commit)"
+                        read -p "Enter the commit ID to be pushed: " commit_id
+                        [[ -z $commit_id ]] && commit_s_cmd='NEW' && bt=$input && input=I && continue
+                    }
                     [[ $commit_id = 'F' ]] && input='L' && continue
                     local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
                     git branch origin_single_push
@@ -2419,11 +2424,19 @@ prompt="
                     repo_state=$?
                     if [ $repo_state -ne 0 ]; then
                         git stash
+                    else
+                        [[ $commit_s_cmd = 'NEW' ]] && {
+                            echo_c -y "There is no content to submit"
+                            git checkout --detach origin_single_push
+                            git branch -D origin_single_push
+                            unset input && continue
+                        }
                     fi
                     git checkout -b single_push --track origin/$remote_branch
-                    git cherry-pick $commit_id
+                    [[ -z $commit_s_cmd ]] && git cherry-pick $commit_id
                     if [ $repo_state -ne 0 ]; then
                         git stash apply
+                        [[ $commit_s_cmd = 'NEW' ]] && git add -u
 prompt_single_push="
 ************************************************************************************************************************
  'A' add file, 'X' exclude file, 'V' view status, 'C' confirm commit, 'L' last once , 'Q' quit and abort
@@ -2454,7 +2467,8 @@ prompt_single_push="
                                         echo_c -y "Merge conflicts exist, need to resolve"
                                         continue
                                     fi
-                                    git commit --amend --no-edit
+                                    [[ -z $commit_s_cmd ]] && git commit --amend --no-edit
+                                    [[ $commit_s_cmd = 'NEW' ]] && git commit -m "$message"
                                     break
                                     ;;
                                 L)
@@ -2462,9 +2476,9 @@ prompt_single_push="
                                         echo_c -y "Merge conflicts exist, need to resolve"
                                         continue
                                     fi
-                                    git commit --amend --no-edit
-                                    git stash drop
-                                    repo_state=1
+                                    [[ -z $commit_s_cmd ]] && git commit --amend --no-edit
+                                    [[ $commit_s_cmd = 'NEW' ]] && git commit -m "$message"
+                                    repo_state='OVER'
                                     break
                                     ;;
                                 Q)
@@ -2480,6 +2494,7 @@ prompt_single_push="
                             esac
                         done
                     fi
+                    unset commit_s_cmd
                     [ -z "$input" ] && continue
                     [ -n "$input" ] && bt=$input && input="push" && continue
                     ;;
@@ -2518,9 +2533,7 @@ prompt_single_push="
                                     git reset --hard
                                     git checkout --detach origin_single_push
                                     git branch -D single_push origin_single_push
-                                    if [ $repo_state -ne 0 ]; then
-                                        git stash pop
-                                    fi
+                                    [ $repo_state -ne 0 ] && git stash pop
                                 else
                                     git reset HEAD^
                                 fi
@@ -2540,10 +2553,9 @@ prompt_single_push="
                             git reset --hard
                             git checkout --detach origin_single_push
                             git branch -D single_push origin_single_push
-                            if [ $repo_state -ne 0 ]; then
-                                git stash pop
-                            fi
                             echo -e "\r\n" >> $temp_commit_log
+                            [ $repo_state -ne 0 ] && git stash pop
+                            [ $repo_state = 'OVER' ] &&  break
                             unset input && continue
                         }
                     fi
@@ -4110,6 +4122,13 @@ commit_count_from_gerrit() {
     rm $temp_file_commit
     rm $temp_file_sort
 }
+env_cfg() {
+    local name=self
+    if hit_option '--repo'; then
+        rm -rf .repo/repo
+        git clone https://gerrit.googlesource.com/git-repo .repo/repo
+    fi
+}
 function dit-tools {
     option_check $arg2
     sudo rm -rf /usr/bin/python
@@ -4132,6 +4151,9 @@ function dit-tools {
             ;;
         commit)
             commit_count_from_gerrit
+            ;;
+        env)
+            env_cfg
             ;;
         *)
             echo -e "\n!!Please check the option parameters"
