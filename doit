@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Tue Nov 18 17:41:43 CST 2025 by skull  ver:25.11.18.17.41
+#@create:Thu Dec 18 14:27:01 CST 2025 by skull  ver:25.12.18.14.26
 # Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -80,15 +80,15 @@ $script_name xml [-s] [-g] [-d]
         new_xml             生成代码差异changelog的新节点xml
 
 构建项目
-$script_name make [-d] [-o] [-t] [-r] [-s] [-v] [--firware-ota] [--backup] [--restore]
+$script_name make [-d] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--restore]
     -d  delta           增量编译
-        --firware-ota       增量固件OTA包
+        --firmware-ota      增量固件OTA包
     -o  ota             ota全量包编译
     -t  tiny            制作差分包
     -r  release         release版本，缺省为debug版本
     -s  select          选择要构建的项目，缺省则在后面选择
     -v  version         指定版本号，版本号写在最后，缺省则为默认版本号：年.月.日.时.分
-    --firware-ota       单固件OTA包
+    --firmware-ota       单固件OTA包
     --backup            备份ota，为快速验证
     --restore           还原ota，为快速验证
     --skip              跳过编译，通常用于制作差分包或打固件升级包，如 -t, -fw
@@ -206,7 +206,7 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [-
         --force             强制同步指定的所有提交
         --select            选择应用提交
         --count             统计代码的修改行数，不应用修改
-        --squash            为压缩提交准备好分支，一般与选项 interact 一起使用
+        --squash            为压缩提交准备好分支，一般与选项 interact 一起使用，后续执行push命令推送压缩提交
         --interact          交互式同步，冲突时待解决后继续
         --test              同步测试，看下有没有冲突
     --undo              撤销同步的修改，缺省参数撤销的是最近一次同步的提交
@@ -285,9 +285,9 @@ $script_name cfg [--fw-dir] [--mk-product] [--signature] [--history] [--commit-e
         -s  show            展示当前配置的路径
         -w  write           修改存储路径
         -p  path            指定生成配置文件存放的路径，缺省则存放在该脚本所在目录
-    --mk-product        创建产品列编译表文件
+    --mk-product        创建产品列编译表文件，缺省参数则写入默认列表
         -d  delete          删除历史产品编译列表文件
-        -e  empty           创建空的产品编译列表文件
+        -e  empty           创建空的产品编译列表文件，前提是文件不存在
     --signature         创建签名存放路径
         -s  show            展示当前配置的路径
     --history           创建操作历史文件配置
@@ -340,6 +340,7 @@ _EXEC_PARAMS=$@
 
 EXEC_PARAMS=("$@")
 
+EXEC_OPTIONS=("${@:2}")
 current_path=`pwd`
 BUILD_TYPE=release
 version=`date +"%y.%-m.%-d.%-H.%M"`
@@ -376,6 +377,7 @@ sport_modules=(
 "ui/phn"
 "ui/translations")
 DOT_DIT=$current_path/.$script_name
+DIT_PATH=$HOME/.$script_name
 CFG_IN_DIR="/etc/dit"
 [ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
 [ -f $CFG_IN_DIR/user ] && GERRIT_USER=$(cat $CFG_IN_DIR/user)
@@ -395,6 +397,7 @@ REPO_STASH_DIFF="repo.stash.diff"
 QUERY_LOG="query.log"
 HANDLE_HISTORY="handle.history"
 MAKE_MENU=$DOT_DIT"/make.product"
+MAKE_SIM_MENU=$DOT_DIT"/make.sim.product"
 CHANGELOG_OUT=$DOT_DIT"/changelog_out"
 BRANCH_RESULT="branch.txt"
 SQUASH_DIR="squash_commit.dir"
@@ -406,7 +409,8 @@ ota_dir=/mnt/d/ota
 read_dir=/mnt/d/work/code
 dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
-[ -f $HOME/.$script_name/signature.path ] && sig_file=$(<$HOME/.$script_name/signature.path) || sig_file="$sign_file_path/sign.pem"
+[ -f $DIT_PATH/signature.path ] && sig_file=$(<$DIT_PATH/signature.path) || sig_file="$sign_file_path/sign.pem"
+DEPEND_PATH=$DOT_DIT"/.depend/"
 echo_cc() {
     local color="$1"
     local text="$2"
@@ -600,8 +604,21 @@ check_last_cmd() {
 contains_element() {
     local element match="$1"
     shift
+    [[ $last_cmd = '?' ]] && echo "match  $match"
     for element; do
-        [[ "$element" == "$match" ]] && return 0
+        [[ $last_cmd = '?' ]] && echo "element $element  ${match%%=*}"
+        if is_number "$match"; then
+            return 0
+        fi
+        [[ "${match%%=*}" == "${element%%=*}" ]] && return 0
+    done
+    return 1
+}
+strict_contains_element() {
+    local element match="$1"
+    shift
+    for element; do
+        [[ "match" == "element" ]] && return 0
     done
     return 1
 }
@@ -657,21 +674,117 @@ run_env_check() {
         sudo mv gerrit $CFG_IN_DIR/
     fi
 }
+extract_2_level_options() {
+    cmd="$1"
+    option="$2"
+    help_file="$3"
+    start_line=$(grep -nw "^$script_name $cmd" $help_file |head -n 1 | cut -d: -f1 | xargs)
+    [[ -z $start_line ]] && return
+    main_option_start_line=$(tail -n +"$start_line" "$help_file" | grep -nwE "^[[:space:]]{4}$option" |head -n 1 |cut -d: -f1 | xargs)
+    line_number=$((start_line + main_option_start_line - 1))
+    options=$(tail -n +"$line_number" "$help_file" | awk -v v_cmd="$cmd" -v v_opt="$option" '
+        /^[ ]{4}[^[:space:]]/ {
+            if ($1 == v_opt) {
+                current_option = $1
+                suboptions[current_option] = ""
+            }
+        }
+        /^\s{8}-[a-zA-Z0-9]/ || /^\s{8}--/ {
+            if (current_option != "") {
+                suboptions[current_option] = suboptions[current_option] " " $1
+            }
+        }
+        /^^[ ]{4}[^[:space:]]/ && $1 != v_opt {
+            exit
+        }
+        END {
+            result = ""
+            for (v_cmd in suboptions) {
+                result = result v_cmd ": " suboptions[v_cmd] "\n"
+            }
+            print result
+        }')
+    echo "$options"
+}
 option_check() {
-    [[ $1 = 'must' ]] && echo -e "\e[47m\e[31m!!Please check the input\e[0m" && exit -1
-    [ -z $1 ] && return 0
-    [ $1 = '?' ] && return 0
-    [ $1 = '@' ] && return 0
+    arg=$1
+    [[ "$arg" = 'must' ]] && echo -e "\e[47m\e[31m!!Please check the input\e[0m" && exit -1
+    [ -z "$arg" ] && return 0
+    [ "$arg" = '?' ] && return 0
+    [ "$arg" = '@' ] && return 0
     help_info >.$script_name/help.info
     args=$(grep -n "$script_name $do_cmd" .$script_name/help.info |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
     readarray -t args <<<$args
-    hint=false
-    for arg in ${args[@]}
-    do
-        [ $arg = $1 ] && hint=true && break
-    done
+    contains_element "$arg" ${args[@]}
+    hint=$?
     rm .$script_name/help.info
-    [ $hint = false ] && echo -e "\a\e[43m!!Please check command option.\e[0m" && exit -1
+    [[ $hint -ne 0 ]] && echo -e "\a\e[43m!!Please check command option.\e[0m" && exit -1
+}
+find_closest_option() {
+    local input="$1"
+    python3 -c "
+import sys
+from difflib import get_close_matches
+input_str = sys.argv[1]
+options = sys.argv[2].split()
+def get_prefix_matches(word, possibilities):
+    direct = [p for p in possibilities if p.startswith(word)]
+    if direct:
+        return direct
+    word_clean = word.lstrip('-')
+    if word_clean:
+        for p in possibilities:
+            p_clean = p.lstrip('-')
+            if p_clean.startswith(word_clean):
+                return [p]
+    if word.startswith('-') and not word.startswith('--') and len(word) > 1:
+        word_no_dash = word[1:]
+        for p in possibilities:
+            if p.startswith('--') and p[2:].startswith(word_no_dash):
+                return [p]
+    if len(word) < 3:
+        sys.exit(0)
+    return []
+prefix_matches = get_prefix_matches(input_str, options)
+if prefix_matches:
+    print(prefix_matches[0])
+    sys.exit(0)
+matches = get_close_matches(input_str, options, n=1, cutoff=0.45)
+if matches:
+    print(matches[0])
+else:
+    print('')
+" "$input" "${args[*]}"
+}
+options_check() {
+    help_file=".$script_name/help.info"
+    help_info >$help_file
+    args=$(grep -n "$script_name $do_cmd" .$script_name/help.info |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
+    readarray -t args <<<$args
+    local hint=true
+    local invalid_option=""
+    for arg in "${EXEC_OPTIONS[@]}"
+    do
+        [ "$arg" = '?' ] && continue
+        [ "$arg" = '@' ] && continue
+        contains_element "$arg" ${args[@]}
+        [[ $? = 1 ]] && {
+            local options=$(extract_2_level_options $do_cmd "$arg2" "$help_file")
+            [[ $last_cmd = '?' ]] && echo "options  $options"
+            contains_element "$arg" ${options[*]}
+            [[ $? = 1 ]] && hint=false && invalid_option="$arg" && break
+        }
+    done
+    rm -f $help_file
+    [ $hint = false ] && {
+        suggestion=$(find_closest_option "$invalid_option")
+        if [[ -n "$suggestion" ]]; then
+            echo_c -y "Unknown option: '$invalid_option'. Did you mean: '$suggestion'?"
+        else
+            echo_c -y "Unknown option: '$invalid_option'"
+        fi
+        exit -1
+    }
 }
 prompt_tone() {
     limit=$1
@@ -816,6 +929,177 @@ convert_iso8601_date() {
     esac
     echo "$result"
 }
+get_git_dir() {
+    local git_path=$(git rev-parse --absolute-git-dir)
+    local repo_path=${git_path#*.repo/projects/}   
+    repo_path=${repo_path%.git}            
+    echo "$repo_path"
+}
+check_time_format() {
+    local time_string=$1
+    local years_ago='^[0-9]+y$'
+    [[ $time_string =~ $years_ago ]] && echo "Y_Ago" && return
+    local months_ago='^[0-9]+mo$'
+    [[ $time_string =~ $months_ago ]] && echo "MO_Ago" && return
+    local weeks_ago='^[0-9]+w$'
+    [[ $time_string =~ $weeks_ago ]] && echo "W_Ago" && return
+    local days_ago='^[0-9]+d$'
+    [[ $time_string =~ $days_ago ]] && echo "D_Ago" && return
+    local hours_ago='^[0-9]+h$'
+    [[ $time_string =~ $hours_ago ]] && echo "H_Ago" && return
+    local minutes_ago='^[0-9]+m$'
+    [[ $time_string =~ $minutes_ago ]] && echo "M_Ago" && return
+    local seconds_ago='^[0-9]+s$'
+    [[ $time_string =~ $seconds_ago ]] && echo "S_Ago" && return
+    local time_hm_regex='^[0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_hm_regex ]] && echo "HM" && return
+    local date_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    [[ $time_string =~ $date_regex ]] && echo "YMD" && return
+    local time_h_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}$'
+    [[ $time_string =~ $time_h_regex ]] && echo "YMDH" && return
+    local time_m_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_m_regex ]] && echo "YMDHM" && return
+    local time_s_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
+    [[ $time_string =~ $time_s_regex ]] && echo "YMDHMS" && return
+    echo "time format unknown"
+    return 1
+}
+time_result() {
+    local time_input=$1
+    if ! ret=$(check_time_format "$time_input"); then
+        echo "$ret"
+    fi
+    local number=$(echo "$time_input" | awk -F'[^0-9]' '{print $1}')
+    [[ $number -eq 0 ]] && ret="$time_input"
+    case $ret in
+        HM)
+            echo "`date "+%Y-%m-%d"` $time_input"
+            ;;
+        YMD|YMDH|YMDHM|YMDHMS)
+            echo "$time_input"
+            ;;
+        Y_Ago)
+            echo "$number year ago"
+            ;;
+        MO_Ago)
+            echo "$number month ago"
+            ;;
+        W_Ago)
+            echo "$number weeks ago"
+            ;;
+        D_Ago)
+            echo "$number day ago"
+            ;;
+        H_Ago)
+            echo "$number hour ago"
+            ;;
+        M_Ago)
+            echo "$number minute ago"
+            ;;
+        S_Ago)
+            echo "$number second ago"
+            ;;
+        *)
+            echo -e "\033[43mTime information input is incorrect\033[0m"
+            echo "Legal style: year-month-day, hour:minute, 1y, 1mo, 1w, 1d, 1h, 1m, 1s"
+            return 2
+            ;;
+    esac
+}
+OPTION_INDEX=0
+OPTION_VALUE=""
+get_option_index_and_value() {
+    local option="$1"
+    local index=-1
+    local value=""
+    local args=("${EXEC_PARAMS[@]}")
+    for ((i = 0; i <= $arg_count; i++)); do
+        arg="${args[$i]}"
+        case $arg in
+            $option=*)
+                value="${arg#$option=}"
+                index=$i
+                ;;
+            $option)
+                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
+                    value="${args[$((i + 1))]}"
+                    index=$((i + 1))
+                    ((i++)) 
+                else
+                    echo_c yellow "Warning: Option $option requires a non-empty value." >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+    OPTION_INDEX=$index
+    OPTION_VALUE=$value
+    [ $last_cmd = '?' ] && echo "Index: "$OPTION_INDEX "Value: "$OPTION_VALUE
+}
+parse_options() {
+    local option_count=0
+    local option="$1"
+    local tips="$2"
+    local -a values=()
+    local -a indices=()
+    local args=("${EXEC_PARAMS[@]}")
+    for ((i = 0; i < "${#args[@]}"; i++)); do
+        arg="${args[$i]}"
+        case $arg in
+            $option=*)
+                values+=("${arg#$option=}")
+                indices+=("$i")
+                ((option_count++))
+                ;;
+            $option)
+                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
+                    values+=("${args[$((i + 1))]}")
+                    indices+=("$((i + 1))")
+                    ((option_count++))
+                    ((i++)) 
+                else
+                    [[ $tips = '?' ]] && echo_c yellow "Option: $option. requires a non-empty value" >&2
+                    return -1
+                fi
+                ;;
+        esac
+    done
+    OPTION_INDEX=("${indices[@]}")
+    OPTION_VALUE=("${values[@]}")
+    if [[ $last_cmd = '?' ]]; then
+        echo "Index: ${OPTION_INDEX[*]}"
+        echo "Values: ${OPTION_VALUE[*]}"
+    fi
+    [[ $option_count -eq 0 ]] && {
+        [[ $tips = '?' ]] && echo_c yellow "Warning: Option $option unknown." >&2
+        return -2
+    }
+    return $option_count
+}
+test_get_option() {
+    get_option_index_and_value --name
+    echo "index: "$OPTION_INDEX " value: "$OPTION_VALUE
+    echo
+    ret=$(parse_options --name)
+    echo "\$?: "$?
+    echo "ret: "$ret
+    echo
+    parse_options --name
+    echo "\$?: "$?
+    echo
+    for i in "${!OPTION_INDEX[@]}"
+    do
+        echo "index: "${OPTION_INDEX[i]} " value: "${OPTION_VALUE[i]}
+    done
+    echo
+    parse_options --value
+    echo "\$?: "$?
+    echo "value: "$OPTION_VALUE
+    echo
+    parse_options --name
+    echo "\$?: "$?
+    [[ ${OPTION_VALUE[@]} =~ 'boyer' ]] && echo "OPTION_VALUE: "${OPTION_VALUE[@]}
+}
 terminal_make() {
     [ ! -f $DECONFIG_PATH ] && return
     origin_version=$(< $DECONFIG_ORIGIN_VER)
@@ -928,18 +1212,13 @@ select_config() {
     done
 }
 product_config() {
-    if [ $do_cmd = 'simul' ]; then
-        if [[ -n $1 ]]; then
-            select_config "$1"
-        else
-            select_config "configs/simulator"
-        fi
-    elif [[ ${EXEC_PARAMS[@]} =~ '-s' ]]; then
-        select_config "configs/simulator"
+    local arg=$1
+    if [[ -n "$1" ]]; then
+        select_config "$1"
     else
         reduced_product_config
     fi
-    echo_c -y "config: "$config_select
+    echo_c -y "config: $config_select\n"
 }
 git_fallback() {
     repo forall -c git reset --hard HEAD~$1
@@ -1115,77 +1394,6 @@ backup_firmware() {
     [ ! -d .$script_name/bak/$product ] && mkdir -p .$script_name/bak/$product/diff
     echo -e "\n\e[42mBackup firmware complete!\e[0m\n" 
 }
-check_time_format() {
-    local time_string=$1
-    local years_ago='^[0-9]+y$'
-    [[ $time_string =~ $years_ago ]] && echo "Y_Ago" && return
-    local months_ago='^[0-9]+mo$'
-    [[ $time_string =~ $months_ago ]] && echo "MO_Ago" && return
-    local weeks_ago='^[0-9]+w$'
-    [[ $time_string =~ $weeks_ago ]] && echo "W_Ago" && return
-    local days_ago='^[0-9]+d$'
-    [[ $time_string =~ $days_ago ]] && echo "D_Ago" && return
-    local hours_ago='^[0-9]+h$'
-    [[ $time_string =~ $hours_ago ]] && echo "H_Ago" && return
-    local minutes_ago='^[0-9]+m$'
-    [[ $time_string =~ $minutes_ago ]] && echo "M_Ago" && return
-    local seconds_ago='^[0-9]+s$'
-    [[ $time_string =~ $seconds_ago ]] && echo "S_Ago" && return
-    local time_hm_regex='^[0-9]{2}:[0-9]{2}$'
-    [[ $time_string =~ $time_hm_regex ]] && echo "HM" && return
-    local date_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-    [[ $time_string =~ $date_regex ]] && echo "YMD" && return
-    local time_h_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}$'
-    [[ $time_string =~ $time_h_regex ]] && echo "YMDH" && return
-    local time_m_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
-    [[ $time_string =~ $time_m_regex ]] && echo "YMDHM" && return
-    local time_s_regex='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
-    [[ $time_string =~ $time_s_regex ]] && echo "YMDHMS" && return
-    echo "time format unknown"
-    return 1
-}
-time_result() {
-    local time_input=$1
-    if ! ret=$(check_time_format "$time_input"); then
-        echo "$ret"
-    fi
-    local number=$(echo "$time_input" | awk -F'[^0-9]' '{print $1}')
-    [[ $number -eq 0 ]] && ret="$time_input"
-    case $ret in
-        HM)
-            echo "`date "+%Y-%m-%d"` $time_input"
-            ;;
-        YMD|YMDH|YMDHM|YMDHMS)
-            echo "$time_input"
-            ;;
-        Y_Ago)
-            echo "$number year ago"
-            ;;
-        MO_Ago)
-            echo "$number month ago"
-            ;;
-        W_Ago)
-            echo "$number weeks ago"
-            ;;
-        D_Ago)
-            echo "$number day ago"
-            ;;
-        H_Ago)
-            echo "$number hour ago"
-            ;;
-        M_Ago)
-            echo "$number minute ago"
-            ;;
-        S_Ago)
-            echo "$number second ago"
-            ;;
-        *)
-            echo -e "\033[43mTime information input is incorrect\033[0m"
-            echo "Legal style: year-month-day, hour:minute, 1y, 1mo, 1w, 1d, 1h, 1m, 1s"
-            return 2
-            ;;
-    esac
-}
 dircfg() {
     sudo echo "Hi~ $GERRIT_USER"
     if [[ -n $1 ]]; then
@@ -1263,7 +1471,7 @@ EOF
     echo "cfg save done!"
 }
 update_product_list() {
-    local input_file="$MAKE_MENU"
+    local input_file="$2"
     [ ! -f $input_file ] && return
     local query_string="$1"
     local max_lines=9
@@ -1285,6 +1493,12 @@ update_product_list() {
     else
         mv "$sorted_temp_file" "$input_file"
     fi
+}
+update_watch_product_list() {
+    update_product_list $1 "$MAKE_MENU"
+}
+update_sim_product_list() {
+    update_product_list $1 "$MAKE_SIM_MENU"
 }
 get_current_branch() {
     local branch=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
@@ -1338,99 +1552,33 @@ update_code_info() {
         echo "xml: "$xml >>.$script_name/$CODE_INFO
     fi
 }
-OPTION_INDEX=0
-OPTION_VALUE=""
-get_option_index_and_value() {
-    local option="$1"
-    local index=-1
-    local value=""
-    local args=("${EXEC_PARAMS[@]}")
-    for ((i = 0; i <= $arg_count; i++)); do
-        arg="${args[$i]}"
-        case $arg in
-            $option=*)
-                value="${arg#$option=}"
-                index=$i
-                ;;
-            $option)
-                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
-                    value="${args[$((i + 1))]}"
-                    index=$((i + 1))
-                    ((i++)) 
-                else
-                    echo_c yellow "Warning: Option $option requires a non-empty value." >&2
-                    return 1
-                fi
-                ;;
-        esac
-    done
-    OPTION_INDEX=$index
-    OPTION_VALUE=$value
-    [ $last_cmd = '?' ] && echo "Index: "$OPTION_INDEX "Value: "$OPTION_VALUE
+count_code_line_from_gerrit() {
+    local file=$1
+    [ ! -f $file ] && echo "!!The file for counting code lines does not exist" && return 1
+    local single_cnt=$2
+    local total_insertions=0
+    local total_deletions=0
+    while read -r line; do
+        if [[ $line =~ sizeInsertions:\ ([0-9]+) ]]; then
+            total_insertions=$((total_insertions + BASH_REMATCH[1]))
+        elif [[ $line =~ sizeDeletions:\ ([0-9]+) ]]; then
+            total_deletions=$((total_deletions + BASH_REMATCH[1]))
+        fi
+    done <$file
+    echo -e "\r\n"
+    echo "Total insertions: $total_insertions"
+    echo "Total deletions : $total_deletions"
+    local commit_msg_lines=10
+    local commit_cnt=$(grep -w "^rowCount:" $file |cut -d ':' -f2)
+    echo "Commit count: "$commit_cnt
+    echo "Code insertions: "$((total_insertions - commit_cnt * commit_msg_lines))
 }
-parse_options() {
-    local option_count=0
-    local option="$1"
-    local tips="$2"
-    local -a values=()
-    local -a indices=()
-    local args=("${EXEC_PARAMS[@]}")
-    for ((i = 0; i < "${#args[@]}"; i++)); do
-        arg="${args[$i]}"
-        case $arg in
-            $option=*)
-                values+=("${arg#$option=}")
-                indices+=("$i")
-                ((option_count++))
-                ;;
-            $option)
-                if [[ $((i + 1)) -lt "${#args[@]}" && "${args[$((i + 1))]}" != -* ]]; then
-                    values+=("${args[$((i + 1))]}")
-                    indices+=("$((i + 1))")
-                    ((option_count++))
-                    ((i++)) 
-                else
-                    [[ $tips = '?' ]] && echo_c yellow "Option: $option. requires a non-empty value" >&2
-                    return -1
-                fi
-                ;;
-        esac
-    done
-    OPTION_INDEX=("${indices[@]}")
-    OPTION_VALUE=("${values[@]}")
-    if [[ $last_cmd = '?' ]]; then
-        echo "Index: ${OPTION_INDEX[*]}"
-        echo "Values: ${OPTION_VALUE[*]}"
-    fi
-    [[ $option_count -eq 0 ]] && {
-        [[ $tips = '?' ]] && echo_c yellow "Warning: Option $option unknown." >&2
-        return -2
-    }
-    return $option_count
-}
-test_get_option() {
-    get_option_index_and_value --name
-    echo "index: "$OPTION_INDEX " value: "$OPTION_VALUE
-    echo
-    ret=$(parse_options --name)
-    echo "\$?: "$?
-    echo "ret: "$ret
-    echo
-    parse_options --name
-    echo "\$?: "$?
-    echo
-    for i in "${!OPTION_INDEX[@]}"
-    do
-        echo "index: "${OPTION_INDEX[i]} " value: "${OPTION_VALUE[i]}
-    done
-    echo
-    parse_options --value
-    echo "\$?: "$?
-    echo "value: "$OPTION_VALUE
-    echo
-    parse_options --name
-    echo "\$?: "$?
-    [[ ${OPTION_VALUE[@]} =~ 'boyer' ]] && echo "OPTION_VALUE: "${OPTION_VALUE[@]}
+init_depend_file() {
+    [ ! -d $DEPEND_PATH ] && mkdir -p $DEPEND_PATH
+    local describe="// 格式要求如下
+// module_name: dir1, dir2, dir3, ...
+// sport: framework/engine/sportEngine, packages/apps/sports, packages/services/sport"
+    echo -e $describe >$DEPEND_PATH/module_dir.dep
 }
 extract_option() {
     help_file="dit.sh"
@@ -1466,27 +1614,6 @@ extract_option() {
         }')
     echo "option: $option"
 }
-count_code_line_from_gerrit() {
-    local file=$1
-    [ ! -f $file ] && echo "!!The file for counting code lines does not exist" && return 1
-    local single_cnt=$2
-    local total_insertions=0
-    local total_deletions=0
-    while read -r line; do
-        if [[ $line =~ sizeInsertions:\ ([0-9]+) ]]; then
-            total_insertions=$((total_insertions + BASH_REMATCH[1]))
-        elif [[ $line =~ sizeDeletions:\ ([0-9]+) ]]; then
-            total_deletions=$((total_deletions + BASH_REMATCH[1]))
-        fi
-    done <$file
-    echo -e "\r\n"
-    echo "Total insertions: $total_insertions"
-    echo "Total deletions : $total_deletions"
-    local commit_msg_lines=10
-    local commit_cnt=$(grep -w "^rowCount:" $file |cut -d ':' -f2)
-    echo "Commit count: "$commit_cnt
-    echo "Code insertions: "$((total_insertions - commit_cnt * commit_msg_lines))
-}
 dollar_symbol() {
     echo "\$# "$# 
     echo "\$? "$? 
@@ -1498,11 +1625,9 @@ dollar_symbol() {
     echo "\$n "$1 $2 $3 
 }
 test_instance() {
-    for cmd in "${command_blacklist[@]}"; do
-        echo "$cmd" "${cmd:0:1}" "${script_name}${cmd}"
-        [ "${cmd:0:1}" == '-' ] && cmd="${script_name}${cmd}"
-        sed -i "/function ${cmd}/,/^\}/d" ___dit.sh
-    done
+    shift
+    echo_text=$(extract_2_level_options $1 $2)
+    echo $echo_text
 }
 function dit-clean {
     mv .$script_name/$HANDLE_HISTORY .
@@ -1527,6 +1652,7 @@ function dit-init {
     echo_c green "sync..."
     repo sync -j16
     [ $? != 0 ] && return -1
+    init_depend_file
     echo -e "\n\e[42mOver!\e[0m\n"
     return 0
 }
@@ -1629,13 +1755,32 @@ function dit-xml {
             [ $last_cmd = '?' ] && echo "old "$old  "new "$new
             old=${old%.*}
             new=${new%.*}
-            cp $old.xml $new.xml .repo/manifests
-            [[ "$current_dir" != *.repo/manifests ]] && cd .repo/manifests
+            if [[ ! -d .repo/manifests ]]; then
+                read -p "Please specify the path where the directory \".repo/manifests\" is located: " input
+                if [[ -z "$input" ]]; then
+                    echo_c -y "Input cannot be empty"
+                    return 1
+                fi
+                manifests_path="$input/.repo/manifests"
+                if [[ ! -d "$manifests_path" ]]; then
+                    echo_c -y "error: dir $input no exsit"
+                    return 1
+                fi
+                cp $old.xml $new.xml $manifests_path
+                cd $manifests_path
+            else
+                cp $old.xml $new.xml .repo/manifests
+                cd .repo/manifests
+            fi
+            if [[ $? -ne 0 ]]; then
+                echo_c -y "cd error: dir .repo/manifests"
+                return 1
+            fi
             local _date=$(date "+%Y%m%d")
             repo diffmanifests $old.xml $new.xml >master_changelog-$_date.txt
-            mv master_changelog-$_date.txt ../..
+            mv master_changelog-$_date.txt $current_path
             rm $old.xml $new.xml
-            cd ../.. >/dev/null
+            cd - >/dev/null
             absolute_path=$(realpath "master_changelog-$_date.txt")
             directory=$(dirname "$absolute_path")
             echo master_changelog-$_date.txt " in " $directory
@@ -1773,10 +1918,10 @@ function dit-make {
         else
             [ -f $MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_MENU)
             product_config
-            update_product_list $config_select
+            update_watch_product_list $config_select
             backup_firmware $config_select
             cd build
-            if [[ ! ${EXEC_PARAMS[@]} =~ '--firware-ota' ]]; then
+            if [[ ! ${EXEC_PARAMS[@]} =~ '--firmware-ota' ]]; then
                 make clean
                 make distclean
             fi
@@ -1836,7 +1981,7 @@ function dit-make {
         fi
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
     }
-    [[ ${EXEC_PARAMS[@]} =~ '--firware-ota' ]] && {
+    [[ ${EXEC_PARAMS[@]} =~ '--firmware-ota' ]] && {
         [[ `pwd` =~ 'build' ]] || cd build
         cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
         sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
@@ -1884,14 +2029,27 @@ function dit-simul {
         cp -r ../simul-bk/sim_app@simx86 build/out
     elif [[ ${EXEC_PARAMS[@]} =~ 'make' ]]; then
         [ ! -f build/sign.pem ] && cp $sig_file ./build
+        local sim_config_select=''
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
             cd build
             make JOBS=16
             [ $? != 0 ] && return -1
         else
             if [[ ${EXEC_PARAMS[@]} =~ '-a' ]]; then
-                get_option_index_and_value -a
-                product_config $OPTION_VALUE
+                while :
+                do
+                    read -p "Enter the simulator configuration path: " sim_mk_path
+                    [[ -d "$sim_mk_path" ]] && echo "$sim_mk_path" >"$DIT_PATH/sim.mk.cfg" && break
+                    echo_c -y "The path does not exist, please check"
+                done
+            fi
+            if [[ -f "$DIT_PATH/sim.mk.cfg" ]]; then
+                sim_mk_path=$(< "$DIT_PATH/sim.mk.cfg")
+                product_config "$sim_mk_path"
+                sim_config_select=$config_select
+                [ -f $MAKE_SIM_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_SIM_MENU)
+                product_config
+                update_sim_product_list $config_select
             else
                 product_config
             fi
@@ -1899,7 +2057,11 @@ function dit-simul {
             if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
                 make clean
                 make distclean
-                make $config_select
+                if [[ -n "$sim_config_select" ]]; then
+                    make $config_select BUILD_SIM=$sim_config_select
+                else
+                    make $config_select
+                fi
                 make ota JOBS=16
                 [ $? != 0 ] && return -1
                 cd - >/dev/null
@@ -1909,7 +2071,11 @@ function dit-simul {
                 simulator/tool/update_vmmc_simx86.sh ota vmmc.bin mount
                 cd - >/dev/null
             else
-                make $config_select
+                if [[ -n "$sim_config_select" ]]; then
+                    make $config_select BUILD_SIM=$sim_config_select
+                else
+                    make $config_select
+                fi
                 make JOBS=16
                 [ $? != 0 ] && return -1
             fi
@@ -1942,13 +2108,15 @@ function dit-gapp {
     }
     cd build
     make $config_select BUILD_TYPE=$debug_release
-    [ ! $module ] && {
-        [ ! $storyboard_module ] && {
+    if [[ -z $module ]]; then
+        if [[ -z $storyboard_module ]]; then
             make -j16 prototype M=common
-        } || {
+        else
             make -j16 prototype M=$storyboard_module
-        }
-    } || make -j16 prototype M=$module
+        fi
+    else
+        make -j16 prototype M=$module
+    fi
 }
 function dit-copy {
     option_check $arg2
@@ -2206,7 +2374,6 @@ function dit-commit {
     [[ $last_cmd = '?' ]] && echo "commit_code_path  ${commit_code_path[@]}"
     local message=$arg4
     local topic=$arg5
-    local reentry="no"
     local bt=""
     local bk=""
     local repo_state=0
@@ -2226,6 +2393,7 @@ prompt_help="
   O: 仅提交不推送，常用来将本次修改作为新提交，可在后续进行推送，亦可实现远端提交历史干净，或为了切分支，或再次同步提交等
   R: 同步提交时产生冲突，冲突解决后，完成解冲突状态，然后进行后续操作
   S: 单笔推送，如本地有多笔未推送的提交，直接推送会将多笔都推送，该选项用来仅推送指定commit-id的提交
+  T: 查看代码仓状态
   E: 清除选项参数
   Q: 退出本次提交流程
 "
@@ -2233,8 +2401,8 @@ prompt="
 -------------------------------------------------------------------------------------------------------
  (Y)confirm commit    (M)mount commit    (N)skip commit    (C)amend commit         (B)change branch
  (A)add file          (X)exclude file    (V)view diff      (I)info check           (L)view log
- (G)new commit        (O)only commit     (S)single push    (R)resolve conflicts    (E)clear settings
- (Q)exit"
+ (G)new commit        (O)only commit     (S)single push    (R)resolve conflicts    (T)repository status
+ (E)clear settings    (Q)exit"
     declare -A prompt_array
     while read -r part; do
         key=$(echo "$part" | sed -E 's/^\(([A-Z])\).*/\1/')
@@ -2257,16 +2425,18 @@ prompt="
         branch=$arg3
         local no_push="no"
         local commit_s_cmd=''
+        local commit_amend_tag='no'
         while true
         do
-            [ ! $input ] && {
+            [[ ! $input ]] && {
                 read -p "$(printf "%s $prompt \n\nYou Choice: ")" input
                 local temp_input="$input"
             }
-            echo_c blue "Operation options: [$input] ${prompt_array[$input]}"
+            [[ $last_cmd = '?' ]] && echo_c -c "Operation options: [$input] ${prompt_array[$input]}"
             case $input in
                 Y|M)
-                    [ ! $branch ] && bt=$input && input=I && continue
+                    [[ ! $branch ]] && bt=$input && input=I && continue
+                    local temp_message=""
                     local result=$(git branch -a| grep "remotes/origin/$branch")
                     [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
                     [[ ! $message ]] && {
@@ -2279,9 +2449,9 @@ prompt="
                             break
                         done
                     }
-                    [ "$temp_message" = 'Q' ] && unset input && continue
+                    [[ "$temp_message" = 'Q' ]] && unset input && continue
                     git commit -m "$message"
-                    [ $input = 'M' ] && git commit --amend
+                    [[ $input = 'M' ]] && git commit --amend
                     input="push" && continue
                     ;;
                 N)
@@ -2294,35 +2464,7 @@ prompt="
                     break
                     ;;
                 C)
-                    if [ $reentry == "yes" ]; then
-                        read -p "> commit branch: " temp_branch
-                        [ ! $temp_branch ] && git reset && break
-                    else
-                        local change_id=$(git log -1 --format=%b |awk -F : '{print $2}' |xargs)
-                        temp_branch=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id |grep "branch:" |awk -F " " '{print $2}')
-                        echo "amend branch: "$temp_branch
-                        local branch_num=$(echo "$temp_branch" |wc -l)
-                        [[ $branch_num -gt 1 ]] && {
-                            readarray -t branches < <(echo "$temp_branch")
-                            local number=0
-                            for branch in "${branches[@]}"; do
-                                echo "$number>: $branch"
-                                ((number++))
-                            done
-                            read -p "Please select branch: " select
-                            if [[ $select =~ ^[0-9]+$ ]]; then
-                                temp_branch=${branches[$select]}
-                            else
-                                temp_branch="$select"
-                            fi
-                        }
-                    fi
-                    reentry="yes"
-                    [ -z "$temp_branch" ] && echo "! Branch Not Found" && continue
-                    local result=$(git branch -a| grep "remotes/origin/$temp_branch")
-                    [ -z "$result" ] && echo "! Branch Not Exist" && continue
-                    reentry="no"
-                    branch=$temp_branch
+                    commit_amend_tag='yes'
                     git commit --amend --no-edit
                     bt=$input && input="push" && continue
                     ;;
@@ -2345,7 +2487,25 @@ prompt="
                     git status
                     ;;
                 V)
-                    git status -v
+                    unset assign_file
+                    read -p "> assign file: " assign_file
+                    if [[ -n $assign_file && -f $assign_file ]]; then
+                        if git status --porcelain -- "$assign_file" |grep '^??'; then
+                            if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+                                git diff NUL -- "$assign_file"
+                            else
+                                git diff /dev/null -- "$assign_file"
+                            fi
+                        elif git status --porcelain -- "$assign_file" | grep '^ [MD]'; then
+                            git diff -- "$assign_file"
+                        elif git status --porcelain -- "$assign_file" | grep '^[AMD]'; then
+                            git diff --cached -- "$assign_file"
+                        else
+                            git status -v
+                        fi
+                    else
+                        git status -v
+                    fi
                     ;;
                 I)
                     if ret=$(get_current_branch); then
@@ -2353,6 +2513,7 @@ prompt="
                     else
                         echo "$ret"
                     fi
+                    echo_c -g "The pre-filled commit message is as follows:"
                     echo " * Branch:   "$branch
                     echo " * Message:  $message"
                     echo " * Topic:    "$topic
@@ -2363,6 +2524,7 @@ prompt="
                         continue
                     }
                     [[ -n $temp_branch ]] && branch=$temp_branch
+                    local temp_message=""
                     local editor=$(cat $CFG_IN_DIR/commit.edit 2>/dev/null)
                     editor=${editor:-0}
                     case "$editor" in
@@ -2417,12 +2579,12 @@ prompt="
                         read -p "Enter the commit ID to be pushed: " commit_id
                         [[ -z $commit_id ]] && commit_s_cmd='NEW' && bt=$input && input=I && continue
                     }
-                    [[ $commit_id = 'F' ]] && input='L' && continue
+                    [[ $commit_id = 'F' ]] && bt=$input && input='L' && continue
                     local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
                     git branch origin_single_push
                     git diff --quiet && git diff --cached --quiet
                     repo_state=$?
-                    if [ $repo_state -ne 0 ]; then
+                    if [[ $repo_state -ne 0 ]]; then
                         git stash
                     else
                         [[ $commit_s_cmd = 'NEW' ]] && {
@@ -2434,12 +2596,19 @@ prompt="
                     fi
                     git checkout -b single_push --track origin/$remote_branch
                     [[ -z $commit_s_cmd ]] && git cherry-pick $commit_id
-                    if [ $repo_state -ne 0 ]; then
+                    if [[ $repo_state -ne 0 ]]; then
                         git stash apply
                         [[ $commit_s_cmd = 'NEW' ]] && git add -u
+help_single_push="
+-------------------------------------------------------------------------------------------------------
+  A: 添加要提交的文件
+  X: 排除要提交的文件
+  T: 查看当前仓状态
+  V: 查看已添加的文件细节
+"
 prompt_single_push="
 ************************************************************************************************************************
- 'A' add file, 'X' exclude file, 'V' view status, 'C' confirm commit, 'L' last once , 'Q' quit and abort
+ 'A' add file, 'X' exclude file, 'T' view status, 'V' view diff, 'C' confirm commit, 'L' last once , 'Q' quit and abort
 "
                         while true
                         do
@@ -2448,37 +2617,55 @@ prompt_single_push="
                             case "$choice" in
                                 A)
                                     git status -s
-                                    read -p " add untracked file: " untracked_file
-                                    git add $untracked_file
+                                    read -p " add submitted file: " submitted_file
+                                    git add $submitted_file
                                     git status
                                     ;;
                                 X)
-                                    git status -s
+                                    git status -sb
                                     read -p " restore file: " restore_file
                                     git restore --staged $restore_file
                                     git status
                                     ;;
-                                V)
+                                T)
                                     git log -1
                                     git status
                                     ;;
-                                C)
-                                    if git ls-files -u | grep -q .; then
-                                        echo_c -y "Merge conflicts exist, need to resolve"
-                                        continue
+                                V)
+                                    unset assign_file
+                                    read -p " assign file: " assign_file
+                                    if [[ -n $assign_file && -f $assign_file ]]; then
+                                        if git status --porcelain -- "$assign_file" |grep '^??'; then
+                                            if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+                                                git diff NUL -- "$assign_file"
+                                            else
+                                                git diff /dev/null -- "$assign_file"
+                                            fi
+                                        elif git status --porcelain -- "$assign_file" | grep '^ [MD]'; then
+                                            git diff -- "$assign_file"
+                                        elif git status --porcelain -- "$assign_file" | grep '^[AMD]'; then
+                                            git diff --cached -- "$assign_file"
+                                        else
+                                            git status -v
+                                        fi
+                                    else
+                                        git status -v
                                     fi
-                                    [[ -z $commit_s_cmd ]] && git commit --amend --no-edit
-                                    [[ $commit_s_cmd = 'NEW' ]] && git commit -m "$message"
-                                    break
                                     ;;
-                                L)
+                                C|L)
                                     if git ls-files -u | grep -q .; then
                                         echo_c -y "Merge conflicts exist, need to resolve"
                                         continue
                                     fi
-                                    [[ -z $commit_s_cmd ]] && git commit --amend --no-edit
+                                    [[ -z $commit_s_cmd ]] && {
+                                        commit_amend_tag='yes'
+                                        git commit --amend --no-edit
+                                    }
                                     [[ $commit_s_cmd = 'NEW' ]] && git commit -m "$message"
-                                    repo_state='OVER'
+                                    repo_state='GOON'
+                                    [[ $choice = 'L' ]] && {
+                                        repo_state='OVER'
+                                    }
                                     break
                                     ;;
                                 Q)
@@ -2489,7 +2676,7 @@ prompt_single_push="
                                     unset input && break
                                     ;;
                                 *)
-                                    echo_c -bg-white "$prompt_single_push"
+                                    echo_c -bg-white "$help_single_push"
                                     ;;
                             esac
                         done
@@ -2502,6 +2689,10 @@ prompt_single_push="
                     git add -u
                     git status
                     git cherry-pick --continue
+                    ;;
+                T)
+                    echo_c -b "project "$(get_git_dir)
+                    git status -sb
                     ;;
                 E)
                     echo "* clear the settings"
@@ -2516,7 +2707,39 @@ prompt_single_push="
                     break 2 
                     ;;
                 push)
-                    [ $no_push = "yes" ] && echo_c yellow "no push" && break
+                    [[ $no_push = "yes" ]] && echo_c yellow "no push" && break
+                    if [[ $commit_amend_tag = 'yes' ]]; then
+                        local change_id=$(git log -1 --format=%b |awk -F : '{print $2}' |xargs)
+                        local ssh_info=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id)
+                        local temp_branch=$(echo "$ssh_info" |grep "branch:" |awk -F " " '{print $2}')
+                        echo "amend branch: "$temp_branch
+                        local branch_num=$(echo "$temp_branch" |wc -l)
+                        [[ $branch_num -gt 1 ]] && {
+                            readarray -t branches < <(echo "$temp_branch")
+                            local number=0
+                            for branch in "${branches[@]}"; do
+                                echo "$number>: $branch"
+                                ((number++))
+                            done
+                            read -p "Please select branch: " select
+                            if [[ $select =~ ^[0-9]+$ ]]; then
+                                temp_branch=${branches[$select]}
+                            else
+                                temp_branch="$select"
+                            fi
+                        }
+                        while :
+                        do
+                            [ -z "$temp_branch" ] && read -p "> commit branch: " temp_branch
+                            local result=$(git branch -a| grep "remotes/origin/$temp_branch")
+                            [ -z "$result" ] && echo "! Branch Not Exist" && unset temp_branch && continue
+                            branch=$temp_branch
+                            break
+                        done
+                        local temp_topic=$(echo "$ssh_info" |grep "topic:" |awk -F " " '{print $2}')
+                        echo "amend topic: "${temp_topic[0]}
+                        topic=${temp_topic[0]}
+                    fi
                     if ret=$(get_current_branch); then
                         current_branch="$ret"
                     fi
@@ -2526,40 +2749,56 @@ prompt_single_push="
                         echo "push: "$branch
                         echo_c -y "!!You'd better not do that"
                         read -p "!!!Continue? [N/y]: " select
-                        [ $select != 'y' ] && {
+                        [[ $select != 'y' ]] && {
                             read -p "I think you should push this branch: $current_branch [Y/n]: " select
-                            [ $select != 'Y' ] && {
+                            [[ $select != 'Y' ]] && {
                                 if [[ $bt = 'S' ]]; then
                                     git reset --hard
                                     git checkout --detach origin_single_push
                                     git branch -D single_push origin_single_push
-                                    [ $repo_state -ne 0 ] && git stash pop
+                                    [[ $repo_state -ne 0 ]] && git stash pop
                                 else
-                                    git reset HEAD^
+                                    git reset
                                 fi
                                 unset input && continue
                             }
                             branch=$current_branch
                         }
                     }
-                    echo -e "project: "${commit_code_path[$index]} >>$temp_commit_log
-                    if [[ $bt = 'C' ]]; then
-                        echo -e "- Amend Commit""\r\n" >>$temp_commit_log
-                        git push origin HEAD:refs/for/$branch 2>&1 |tee -a $temp_commit_log
-                    else
-                        echo -e "- New Commit""\r\n" >>$temp_commit_log
-                        git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
-                        [[ $bt = 'S' ]] && {
+                    git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
+                    status=${PIPESTATUS[0]}
+                    if [[ $status -ne 0 ]]; then
+                        echo_c -y "git push fail"
+                        echo "Re-push after inspection"
+                        if [[ $bt = 'C' ]]; then
+                            git reset
+                            unset input && continue
+                        elif [[ $bt = 'S' ]]; then
                             git reset --hard
                             git checkout --detach origin_single_push
                             git branch -D single_push origin_single_push
-                            echo -e "\r\n" >> $temp_commit_log
-                            [ $repo_state -ne 0 ] && git stash pop
-                            [ $repo_state = 'OVER' ] &&  break
+                            git stash pop
                             unset input && continue
-                        }
+                        fi
+                    fi
+                    echo -e "project: "${commit_code_path[$index]} >>$temp_commit_log
+                    if [[ $commit_amend_tag = 'yes' ]]; then
+                        echo -e "- Amend Commit""\r\n" >>$temp_commit_log
+                    else
+                        echo -e "- New Commit""\r\n" >>$temp_commit_log
                     fi
                     echo -e "\r\n" >> $temp_commit_log
+                    [[ $bt = 'S' ]] && {
+                        git reset --hard
+                        git checkout --detach origin_single_push
+                        git branch -D single_push origin_single_push
+                        if [[ $repo_state = 'GOON' ]]; then
+                            git stash pop
+                        elif [[ $repo_state = 'OVER' ]]; then
+                            break
+                        fi
+                        unset input && continue
+                    }
                     break
                     ;;
                 *)
@@ -2574,7 +2813,7 @@ prompt_single_push="
         cd - >/dev/null
     done
     local size_commit_log=$(stat -c %s $temp_commit_log)
-    [ $size_commit_log -gt 0 ] && {
+    [[ $size_commit_log -gt 0 ]] && {
         {
             echo $(date)
             echo $split_line
@@ -2614,7 +2853,7 @@ function dit-push {
             while true
             do
                 echo -e "\n> (press Ctrl+D to finish.Keep, press 'Enter'. ) commit message:"
-                temp_message=$(cat)
+                local temp_message=$(cat)
                 [ -n "$temp_message" ] && message="$temp_message" && break
                 [ -n "$message" ] && break
             done
@@ -3259,11 +3498,11 @@ function dit-cp {
         readarray -t code_path <<<$code_path
         [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
             local branch=$(grep branch .$script_name/$CODE_INFO |cut -d' ' -f2)
-            printf "%s\n" "${code_path[@]}" >squash_commit.dir.temp
-            awk '{count[$0]++} END {for (line in count) if (count[line] > 1) print line}' squash_commit.dir.temp |sort -u >$SQUASH_DIR
-            squash_commit_create_branch $branch squash_commit.dir
+            printf "%s\n" "${code_path[@]}" >$SQUASH_DIR.temp
+            awk '{count[$0]++} END {for (line in count) if (count[line] > 1) print line}' $SQUASH_DIR.temp |sort -u >$SQUASH_DIR
+            squash_commit_create_branch $branch $SQUASH_DIR
             mv $SQUASH_DIR .$script_name
-            rm -rf squash_commit.dir.temp
+            rm -rf $SQUASH_DIR.temp
         }
         grep -w "open:" $SSH_GET >.$script_name/cp_project_open.tmp 
         readarray -t commit_opens < <(awk -F ":" '{print $2}' .$script_name/cp_project_open.tmp)
@@ -4170,23 +4409,30 @@ function dit-cfg {
             reval=$?
             ;;
         --mk-product)
-            local output_file="$MAKE_MENU"
-            [[ ${EXEC_PARAMS[@]} =~ '-d' ]] && rm $output_file
-            [[ ${EXEC_PARAMS[@]} =~ '-e' ]] && >$output_file
-            [ ! -f $output_file ] && {
-                for string in "${enum_config[@]}"
-                do
-                    entry="$string 1"
-                    echo -e "$entry" >> "$output_file"
-                done
-            }
+            local mk_files=("$MAKE_MENU" "$MAKE_SIM_MENU")
+            for file in "${mk_files[@]}"
+            do
+                if hit_option '-d'; then
+                    rm -f $file
+                fi
+                if hit_option '-e' && [ ! -f "$file" ]; then
+                    >$file
+                fi
+                [ ! -f $file ] && {
+                    for string in "${enum_config[@]}"
+                    do
+                        entry="$string 1"
+                        echo -e "$entry" >> "$file"
+                    done
+                }
+            done
             ;;
         --signature)
             [[ $last_cmd = '-s' ]] && {
-                cat $HOME/.$script_name/signature.path
+                cat $DIT_PATH/signature.path
                 return 0
             }
-            echo "now path: "$(cat $HOME/.$script_name/signature.path)
+            echo "now path: "$(cat $DIT_PATH/signature.path)
             read -p "Enter your signature path: " signature_path
             [[ ! -d $signature_path ]] && {
                 read -p "The path does not exist, do you need to create it? Y/N: " answer
@@ -4198,7 +4444,7 @@ function dit-cfg {
                     return 1
                 }
             }
-            echo $signature_path"/sign.pem" >$HOME/.$script_name/signature.path
+            echo $signature_path"/sign.pem" >$DIT_PATH/signature.path
             ;;
         --history)
             echo -e "\nWrite order of operation history file:\n0> LIFO\n1> FIFO"
@@ -4307,7 +4553,7 @@ function dit-hello {
     run_env_check
     echo "working..."
     env_name=$HOME"/.bashrc"
-    script_exe_path=$HOME/.$script_name
+    script_exe_path=$DIT_PATH
     [ ! -f $env_name ] && echo "Create ENV file!" && touch $env_name
     add_env_path="export PATH=\"$script_exe_path:\$PATH\""
     escape_str=`echo $add_env_path |sed 's#\/#\\\/#g'`
@@ -4540,8 +4786,9 @@ function END {
     exit 0
 }
 function main {
-    BEGIN
     cmd_check
+    options_check
+    BEGIN
     $script_name-$do_cmd $@
     END
 }
