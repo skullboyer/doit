@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Dec 18 14:27:01 CST 2025 by skull  ver:25.12.18.14.26
+#@create:Mon Dec 22 12:38:14 CST 2025 by skull  ver:25.12.22.12.38
 # Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -50,9 +50,9 @@ cat <<EOFHELP
 usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
 
 初始化代码仓库
-$script_name init {branch_name} {manifest_xml}
-    branch_name         manifest仓分支，缺省则为master分支
-    manifest_xml        要切换的xml配置文件，缺省则为huamiOS.xml
+$script_name init [-b] [-x]
+    -b  branch          后跟manifest仓分支，缺省则为master分支
+    -x  xml             后跟要切换的xml配置文件，缺省则为huamiOS.xml
 
 同步代码仓库
 $script_name sync [--depth] [--repo] [--rebase]
@@ -341,6 +341,7 @@ _EXEC_PARAMS=$@
 EXEC_PARAMS=("$@")
 
 EXEC_OPTIONS=("${@:2}")
+
 current_path=`pwd`
 BUILD_TYPE=release
 version=`date +"%y.%-m.%-d.%-H.%M"`
@@ -765,6 +766,7 @@ options_check() {
     local invalid_option=""
     for arg in "${EXEC_OPTIONS[@]}"
     do
+        [ "$arg" = '$' ] && continue
         [ "$arg" = '?' ] && continue
         [ "$arg" = '@' ] && continue
         contains_element "$arg" ${args[@]}
@@ -1530,12 +1532,24 @@ get_active_map_remote_branch() {
 update_code_info() {
     if is_valid_cmd 'init'; then
         echo $(date) >.$script_name/$CODE_INFO
-        local branch="$arg2"
-        [[ -z $branch ]] && branch="master"
-        echo "branch: "$branch >>.$script_name/$CODE_INFO
-        xml="$arg3"
-        [[ -z $xml ]] && xml="huamiOS"
-        echo "xml: "$xml >>.$script_name/$CODE_INFO
+        branch_name=master
+        if hit_option '-b'; then
+            get_option_index_and_value -b
+            local branch=$OPTION_VALUE
+            if [[ -n "$branch" ]]; then
+                branch_name="$branch"
+            fi
+        fi
+        echo "branch: "$branch_name >>.$script_name/$CODE_INFO
+        xml_name=huamiOS
+        if hit_option '-x'; then
+            get_option_index_and_value -x
+            local xml=$OPTION_VALUE
+            if [[ -n "$xml" ]]; then
+                xml_name="$xml"
+            fi
+        fi
+        echo "xml: "$xml_name >>.$script_name/$CODE_INFO
     elif is_valid_cmd 'sync'; then
         echo $(date) >.$script_name/$CODE_INFO
         cd .repo/manifests
@@ -1642,10 +1656,22 @@ function dit-clean {
     return 0
 }
 function dit-init {
-    branch_name=$arg2
-    xml_name=$arg3
-    [ ! $branch_name ] && branch_name=master
-    [ ! $xml_name ] && xml_name=huamiOS
+    branch_name=master
+    if hit_option '-b'; then
+        get_option_index_and_value -b
+        local branch=$OPTION_VALUE
+        if [[ -n "$branch" ]]; then
+            branch_name="$branch"
+        fi
+    fi
+    xml_name=huamiOS
+    if hit_option '-x'; then
+        get_option_index_and_value -x
+        local xml=$OPTION_VALUE
+        if [[ -n "$xml" ]]; then
+            xml_name="$xml"
+        fi
+    fi
     git clone https://gerrit.googlesource.com/git-repo .repo/repo
     echo_c green "init..."
     repo init --repo-url=ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/git-repo -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
@@ -2051,7 +2077,7 @@ function dit-simul {
                 product_config
                 update_sim_product_list $config_select
             else
-                product_config
+                product_config "configs/simulator"
             fi
             cd build
             if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
@@ -4788,6 +4814,7 @@ function END {
 function main {
     cmd_check
     options_check
+    [[ $last_cmd = '$' ]] && exit 0
     BEGIN
     $script_name-$do_cmd $@
     END
