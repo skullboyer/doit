@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Dec 22 12:38:14 CST 2025 by skull  ver:25.12.22.12.38
+#@create:Tue Dec 23 20:43:17 CST 2025 by skull  ver:25.12.23.20.43
 # Copyright © 2022-2025 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -668,7 +668,7 @@ run_env_check() {
             [ -z $gerrit_name ] && gerrit_name=$(wslvar USERNAME)
         fi
     done
-    if [ $error = 1 ]; then
+    if [ $error = 0 ]; then
         echo $gerrit_name >user
         sudo mv user $CFG_IN_DIR
         echo $gerrit_service >gerrit
@@ -762,7 +762,7 @@ options_check() {
     help_info >$help_file
     args=$(grep -n "$script_name $do_cmd" .$script_name/help.info |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
     readarray -t args <<<$args
-    local hint=true
+    local hint=unknown
     local invalid_option=""
     for arg in "${EXEC_OPTIONS[@]}"
     do
@@ -774,7 +774,10 @@ options_check() {
             local options=$(extract_2_level_options $do_cmd "$arg2" "$help_file")
             [[ $last_cmd = '?' ]] && echo "options  $options"
             contains_element "$arg" ${options[*]}
-            [[ $? = 1 ]] && hint=false && invalid_option="$arg" && break
+            [[ $? = 1 ]] && {
+                [[ "$arg" != -* ]] && hint=ignore && break
+                hint=false && invalid_option="$arg" && break
+            }
         }
     done
     rm -f $help_file
@@ -1759,7 +1762,8 @@ function dit-xml {
             [[ $last_cmd =~ ^[0-9]+$ ]] && git_fallback $last_cmd
             echo "XML Switching..."
             [[ $manifest_branch ]] && {
-                $script init $manifest_branch $manifest_xml
+                rm -rf .repo
+                $script init -b=$manifest_branch -x=$manifest_xml
                 return $?
             }
             repo init -m ${manifest_xml%.*}.xml
@@ -4592,7 +4596,7 @@ function dit-hello {
         cp $script $script_exe_path
         chmod +x $script_exe_path
     }
-    $script comple -p $script_exe_path -w
+    $script comple -p=$script_exe_path -w
     dircfg -p $CFG_IN_DIR
     $script cfg --signature
     return 0
