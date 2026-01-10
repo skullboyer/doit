@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-#@create:Tue Dec 23 20:43:17 CST 2025 by skull  ver:25.12.23.20.43
-# Copyright © 2022-2025 <copyright skull.gu@gmail.com>
+#@create:Sat Jan 10 15:22:57 CST 2026 by skull  ver:26.1.10.15.22
+# Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 # and associated documentation files (the “Software”), to deal in the Software without
@@ -1411,7 +1411,7 @@ dircfg() {
             echo "now flash path: " $flash_dir
             read -p "new flash path(default is keep): " temp1
             [ ! -d $temp1 ] && {
-                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                read -p "The path does not exist, do you need to create it? [Y/N]: " answer
                 [ $answer = 'Y' ] && mkdir $temp1
             }
             [ $temp1 ] && flash_dir=$temp1
@@ -1419,7 +1419,7 @@ dircfg() {
             echo "now ota path: " $ota_dir
             read -p "new ota path(default is keep): " temp2
             [ ! -d $temp2 ] && {
-                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                read -p "The path does not exist, do you need to create it? [Y/N]: " answer
                 [ $answer = 'Y' ] && mkdir $temp2
             }
             [ $temp2 ] && ota_dir=$temp2
@@ -1427,7 +1427,7 @@ dircfg() {
             echo "now read path: " $read_dir
             read -p "new read path(default is keep): " temp3
             [ ! -d $temp3 ] && {
-                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                read -p "The path does not exist, do you need to create it? [Y/N]: " answer
                 [ $answer = 'Y' ] && mkdir $temp3
             }
             [ $temp3 ] && read_dir=$temp3
@@ -1744,7 +1744,7 @@ function dit-xml {
                 clean=1
             fi
             [ $clean -eq 1 ] && {
-                read -p "Clean code repository [Y/n]: " input
+                read -p "Clean code repository? [Y/n]: " input
                 [[ "$input" = 'Y' ]] && $script sync --depth 9
             }
             [[ ${EXEC_PARAMS[@]} =~ '--branch' ]] && {
@@ -1885,7 +1885,7 @@ function dit-sync {
         }'
         [ -s $temp_file ] && {
             echo -e "\n"
-            read -p "⚠️ 要丢弃这些文件么[Y/n]: " input
+            read -p "Discard these? [Y/n]: " input
             [[ "$input" != 'Y' ]] && rm $temp_file && return 1
             while IFS= read -r line; do
                 git -C $line reset --hard HEAD
@@ -2610,7 +2610,6 @@ prompt="
                         [[ -z $commit_id ]] && commit_s_cmd='NEW' && bt=$input && input=I && continue
                     }
                     [[ $commit_id = 'F' ]] && bt=$input && input='L' && continue
-                    local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
                     git branch origin_single_push
                     git diff --quiet && git diff --cached --quiet
                     repo_state=$?
@@ -2624,10 +2623,35 @@ prompt="
                             unset input && continue
                         }
                     fi
+                    local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
+                    branch=$remote_branch 
                     git checkout -b single_push --track origin/$remote_branch
-                    [[ -z $commit_s_cmd ]] && git cherry-pick $commit_id
+                    git fetch
+                    [[ -z $commit_s_cmd ]] && {
+                        git cherry-pick $commit_id
+                        [ $? -ne 0 ] && {
+                            echo_c -y "!!cherry-pick代码冲突"
+                            git diff --check
+                            while true
+                            do
+                                unset enter
+                                read -p "解决完冲突后输入 [yes] 继续: " enter
+                                [[ $enter = 'yes' ]] && break
+                            done
+                        }
+                    }
                     if [[ $repo_state -ne 0 ]]; then
                         git stash apply
+                        [ $? -ne 0 ] && {
+                            echo_c -y "!!stash代码冲突"
+                            git diff --check
+                            while true
+                            do
+                                unset enter
+                                read -p "解决完冲突后输入 [yes] 继续: " enter
+                                [[ $enter = 'yes' ]] && break
+                            done
+                        }
                         [[ $commit_s_cmd = 'NEW' ]] && git add -u
 help_single_push="
 -------------------------------------------------------------------------------------------------------
@@ -2807,7 +2831,7 @@ prompt_single_push="
                             git reset --hard
                             git checkout --detach origin_single_push
                             git branch -D single_push origin_single_push
-                            git stash pop
+                            [[ $repo_state -ne 0 ]] && git stash pop
                             unset input && continue
                         fi
                     fi
@@ -2904,7 +2928,7 @@ function dit-push {
         echo "Branch: "$current_branch
         [ -n "$current_branch" ] && branch="$current_branch"
         unset enter
-        read -p "$(echo_c -g '\nbranch: '"$branch"'\n'Confirm the submit:Y/N? or modify submit branch:M?): " enter
+        read -p "$(echo_c -g '\nbranch: '"$branch"'\n'Confirm the submit?:[Y/N] or modify submit branch?:[M]): " enter
         [[ $enter = 'Q' || $enter = 'q' ]] && exit 0
         [[ $enter = 'M' ]] && {
             read -p "new branch name: " bn_enter
@@ -2941,7 +2965,7 @@ function dit-stash {
         anser='Y'
         repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
-        read -p "\$ Confirm stash apply above Y/N: " anser
+        read -p "\$ Confirm stash apply above? [Y/N]: " anser
         echo -e "\n\n"$split_line >>.$script_name/$REPO_STASH
         [[ $anser && $anser = 'Y' ]] && {
             repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a .$script_name/$REPO_STASH
@@ -2953,7 +2977,7 @@ function dit-stash {
     if hit_option '-d' || hit_option '--apply-drop'; then
         repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
-        read -p "\$ Confirm stash drop all Y/N: " anser
+        read -p "\$ Confirm stash drop all? [Y/N]: " anser
         [[ $anser && $anser = 'Y' ]] && {
             repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a .$script_name/$REPO_STASH
         }
@@ -2980,7 +3004,7 @@ function dit-stash {
     }
     [ $arg2 = '-s' ] && {
         grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.tmp
-        read -p "\$ Confirm stash above all Y/N: " anser
+        read -p "\$ Confirm stash above all? [Y/N]: " anser
         [[ ! $anser || ($anser != 'N' && $anser != 'Y') ]] && echo "!!Invalid input" && return 1
         [ $anser = 'Y' ] && ansersub='Y'
         [ "$comment" = '.' ] && {
@@ -2996,7 +3020,7 @@ function dit-stash {
         for path in ${stash_code_path[@]}
         do
             cd $path
-            [ $anser = 'N' ] && git status && read -p "\$ Confirm stash this Y/N: " ansersub
+            [ $anser = 'N' ] && git status && read -p "\$ Confirm stash this? [Y/N]: " ansersub
             [ $ansersub = 'Y' ] && git stash push -m "$comment" |tee -a $DOT_DIT/$REPO_STASH
             cd - >/dev/null
         done
@@ -3601,7 +3625,7 @@ function dit-cp {
                 hit_option '--interact' && {
                     while true
                     do
-                        read -p "To continue press Y: " input
+                        read -p "To continue press [Y]: " input
                         [ $input = 'Y' ] && echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG && break
                     done
                 }
@@ -4465,7 +4489,7 @@ function dit-cfg {
             echo "now path: "$(cat $DIT_PATH/signature.path)
             read -p "Enter your signature path: " signature_path
             [[ ! -d $signature_path ]] && {
-                read -p "The path does not exist, do you need to create it? Y/N: " answer
+                read -p "The path does not exist, do you need to create it? [Y/N]: " answer
                 [[ $answer == 'Y' ]] && {
                     mkdir $signature_path
                     echo "Please move the file sign.pem to the path : " $signature_path
@@ -4513,7 +4537,7 @@ function dit-code {
     [ $arg3 ] && {
         [ ! -d $arg3 ] && {
             echo "The entered storage path does not exist!"
-            read -p "Create a directory Y/N?: " answer
+            read -p "Create a directory [Y/N]?: " answer
             [ $answer = 'Y' ] && mkdir -p $arg3
         }
         [ -d $arg3 ] && code_destination_path=$arg3
@@ -4556,7 +4580,7 @@ uiframework
         }
         [ ! -d $move_dir ] && {
             echo "You entered storage path does not exist!"
-            read -p "Create a directory Y/N?: " answer
+            read -p "Create a directory? [Y/N]: " answer
             [ $answer = 'Y' ] && mkdir -p $move_dir
             while :
             do
@@ -4570,7 +4594,7 @@ uiframework
     [ -d $code_destination_path ] && {
         [ -f $code_destination_path/${arg2}_$read.tar.gz ] && rm -rf $code_destination_path/${arg2}_$read.tar.gz
         mv ${arg2}_$read.tar.gz $code_destination_path/${arg2}.tar.gz
-        read -p "Unzip the code package Y/N?: " answer
+        read -p "Unzip the code package? [Y/N]: " answer
         [ $answer = 'Y' ] && {
             cd $code_destination_path
             tar xvf ${arg2}.tar.gz
