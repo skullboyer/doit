@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Sat Jan 10 15:22:57 CST 2026 by skull  ver:26.1.10.15.22
+#@create:Thu Feb 26 11:03:02 CST 2026 by skull  ver:26.2.26.11.02
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -347,24 +347,24 @@ BUILD_TYPE=release
 version=`date +"%y.%-m.%-d.%-H.%M"`
 debug_release=debug
 enum_config=(
+mhs003_munich_defconfig
+mhs003_makalu_defconfig
+mhs003_rocky_defconfig
+mhs003_rimo_defconfig
 mhs003_matterhorn_defconfig
+mhs003_lyon_defconfig
 mhs003_milan_defconfig
 mhs003_pamir_defconfig
-mimxrt595_monaco_defconfig
-mimxrt595_andes_defconfig
-mimxrt595_vienna_defconfig
-mimxrt595_teide_defconfig
-mimxrt595_berlin_defconfig
 )
 enum_product_name=(
-monaco
-swift
-swordfish
-andes
-teide
-vienna
-berlin
-lille
+munich
+makalu
+rocky
+rimo
+matterhorn
+lyon
+milan
+pamir
 res_tool
 )
 sport_modules=(
@@ -512,6 +512,75 @@ test_echo_c() {
     echo_c -br -bg-gray "错误: 无法连接服务器!"
     echo_c -bg "成功: 文件已保存 ✅"
     echo_c -c "提示: 请按 Enter 继续..."
+}
+read_c() {
+    local style="$1"
+    local prompt="$2"
+    local varname="$3"
+    if [[ -z "$style" || -z "$prompt" || -z "$varname" ]]; then
+        echo "Usage: read_c <style> \"<prompt>\" <variable>" >&2
+        return 1
+    fi
+    case "$style" in
+        -bk|black)     tput setaf 0 ;;
+        -r|red)        tput setaf 1 ;;
+        -g|green)      tput setaf 2 ;;
+        -y|yellow)     tput setaf 3 ;;
+        -b|blue)       tput setaf 4 ;;
+        -m|magenta)    tput setaf 5 ;;
+        -c|cyan)       tput setaf 6 ;;
+        -w|white)      tput setaf 7 ;;
+        -bbk|bright_black|gray)    tput setaf 8 ;;
+        -br|bright_red)            tput setaf 9 ;;
+        -bg|bright_green)          tput setaf 10 ;;
+        -by|bright_yellow)         tput setaf 11 ;;
+        -bb|bright_blue)           tput setaf 12 ;;
+        -bm|bright_magenta)        tput setaf 13 ;;
+        -bc|bright_cyan)           tput setaf 14 ;;
+        -bw|bright_white)          tput setaf 15 ;;
+        -fb|bold)                tput bold ;;
+        -fu|underline)           tput smul ;;
+        -fbr|bold_red)           tput bold; tput setaf 1 ;;
+        -fbg|bold_green)         tput bold; tput setaf 2 ;;
+        -fby|bold_yellow)        tput bold; tput setaf 3 ;;
+        -fbb|bold_blue)          tput bold; tput setaf 4 ;;
+        -fbm|bold_magenta)       tput bold; tput setaf 5 ;;
+        -fbc|bold_cyan)          tput bold; tput setaf 6 ;;
+        -fbw|bold_white)         tput bold; tput setaf 7 ;;
+        reset)              tput sgr0; return 0 ;;
+        *)                  ;;
+    esac
+    printf "%s" "$prompt"
+    tput sgr0
+    read -r "$varname"
+}
+test_read_c()
+{
+    read_c -bk  "黑色录入：" input
+    read_c -r   "红色录入：" input
+    read_c -g   "绿色录入：" input
+    read_c -y   "黄色录入：" input
+    read_c -b   "蓝色录入：" input
+    read_c -m   "紫色录入：" input
+    read_c -c   "青色录入：" input
+    read_c -w   "白色录入：" input
+    read_c -bbk "高亮黑色录入：" input
+    read_c -br  "高亮红色录入：" input
+    read_c -bg  "高亮绿色录入：" input
+    read_c -by  "高亮黄色录入：" input
+    read_c -bb  "高亮蓝色录入：" input
+    read_c -bm  "高亮紫色录入：" input
+    read_c -bc  "高亮青色录入：" input
+    read_c -bw  "高亮白色录入：" input
+    read_c -fb  "粗体黑色录入：" input
+    read_c -fu  "下划线录入：" input
+    read_c -fbr "粗体红色录入：" input
+    read_c -fbg "粗体绿色录入：" input
+    read_c -fby "粗体黄色录入：" input
+    read_c -fbb "粗体蓝色录入：" input
+    read_c -fbm "粗体紫色录入：" input
+    read_c -fbc "粗体青色录入：" input
+    read_c -fbw "粗体白色录入：" input
 }
 escape_for_grep() {
     local input="$1"
@@ -1643,8 +1712,7 @@ dollar_symbol() {
 }
 test_instance() {
     shift
-    echo_text=$(extract_2_level_options $1 $2)
-    echo $echo_text
+    test_read_c
 }
 function dit-clean {
     mv .$script_name/$HANDLE_HISTORY .
@@ -1675,9 +1743,11 @@ function dit-init {
             xml_name="$xml"
         fi
     fi
-    git clone https://gerrit.googlesource.com/git-repo .repo/repo
+    [ -d .repo/repo ] && rm -rf .repo/repo
+    git clone --depth=1 https://github.com/GerritCodeReview/git-repo .repo/repo
     echo_c green "init..."
-    repo init --repo-url=ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/git-repo -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
+    echo "branch: $branch_name  xml: ${xml_name}.xml"
+    repo init -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
     echo_c green "sync..."
     repo sync -j16
     [ $? != 0 ] && return -1
@@ -1936,14 +2006,16 @@ function dit-make {
     [[ ${EXEC_PARAMS[@]} =~ '--skip' ]] || {
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
             [ ! -f build/.config ] && echo_c -y "!!missing config" && return 1
-            local platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}')
-            echo -e "\n**platform: "$platform
-            if [ "$platform" = \"mhs003\" ]; then
-                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mhs003/init/board_bsd.c
-            elif [[ $platform =~ "mimxrt595" ]]; then
-                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/mimxrt595/board_bsd.c
-            elif [[ $platform = "apollo4" ]]; then
-                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/apollo4/board_bsd.c
+            local hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
+            [[ -z "$hm_platform" ]] && {
+                echo_c -r "HMI_BUILD_BOARD not found in build/.config"
+                return -1
+            }
+            echo -e "\n**platform: "$hm_platform
+            if [[ "$hm_platform" =~ ^mhs003 ]]; then
+                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/init/board_bsd.c
+            else
+                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/board_bsd.c
             fi
         else
             [ -f $MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_MENU)
@@ -1951,7 +2023,7 @@ function dit-make {
             update_watch_product_list $config_select
             backup_firmware $config_select
             cd build
-            if [[ ! ${EXEC_PARAMS[@]} =~ '--firmware-ota' ]]; then
+            if hit_option '-o'; then
                 make clean
                 make distclean
             fi
@@ -1983,15 +2055,21 @@ function dit-make {
         [[ `pwd` =~ 'build' ]] || cd build
         if hit_option '-o'; then
             [[ $config_select =~ "mhs003" ]] && {
-                local tmp="${config_select#mhs003_}"
+                local hm_platform=$(grep HMI_BUILD_BOARD .config |awk -F "=" '{print $2}' |tr -d ' "')
+                local tmp="${config_select#${hm_platform}_}"
                 local product="${tmp%_defconfig}"
-                echo "other core: build mhs003" >>../$OTA_VERSION
-                [ -d out_hub ] && rm out_hub -rf
-                make mhs003_${product}_sensorhub_defconfig APPDIR=out_hub
-                make BUILD_DIR=out_hub APPDIR=out_hub
-                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003.bin ../platform/board/mhs003/products/${product}/sensorhub
-                cp out_hub/sensorhub@mhs003/binary/sensorhub@mhs003_sign.bin ../platform/board/mhs003/products/${product}/sensorhub
-                echo_c -g "Small core compilation completed!\n"
+                [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
+                echo "other core: build ${hm_platform}" >>../$OTA_VERSION
+                [ -d out_hub ] && rm -rf out_hub
+                if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
+                    make BUILD_DIR=out_hub APPDIR=out_hub; then
+                    cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                    cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                    echo_c -g "Small core compilation completed!\n"
+                else
+                    echo_c -r "Make failed!"
+                    return -2
+                fi
             }
             make ota -j16
         else
@@ -1999,12 +2077,10 @@ function dit-make {
         fi
         local make_result=$?
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
-            if [ "$platform" = \"mhs003\" ]; then
-                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mhs003/init/board_bsd.c
-            elif [ "$platform" = \"mimxrt595\" ]; then
-                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/mimxrt595/board_bsd.c
-            elif [[ $platform = "apollo4" ]]; then
-                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/apollo4/board_bsd.c
+            if [[ "$platform" =~ "mhs003" ]]; then
+                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/init/board_bsd.c
+            else
+                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/board_bsd.c
             fi
         else
             mv $temp $deconfig
@@ -2409,23 +2485,23 @@ function dit-commit {
     local repo_state=0
 prompt_help="
 *******************************************************************************************************
-  Y: 确认本次提交，输入提交信息，如分支、描述、Topic，然后推送到远端仓库
-  M: 挂载提交，将本次提交追加到gerrit上存在的指定的提交上去，会让你输入对应change-id
-  N: 跳过本次提交，即什么也不敢，保持本地不变
-  C: 追加提交，将本次修改追加到本地的上一笔提交，一般用来在同步到本地的提交上做修改
-  B: 修改提交分支，常用来不同仓推到不同分支上
   A: 添加未跟踪文件，加入新增的文件
-  X: 排除文件，去掉本次提交的部分文件
-  V: 查看详细修改，确认本次提交修改的具体内容
+  B: 修改提交分支，常用来不同仓推到不同分支上
+  C: 追加提交，将本次修改追加到本地的上一笔提交，一般用来在同步到本地的提交上做修改
+  E: 清除选项参数
+  G: 生成新提交，用于将同步到本地的提交结合本地修改，作为新提交推送
   I: 提交信息核查，如分支、描述、Topic
   L: 查看提交历史，本地代码仓的提交描述历史
-  G: 生成新提交，用于将同步到本地的提交结合本地修改，作为新提交推送
+  M: 挂载提交，将本次提交追加到gerrit上存在的指定的提交上去，会让你输入对应change-id
+  N: 跳过本次提交，即什么也不敢，保持本地不变
   O: 仅提交不推送，常用来将本次修改作为新提交，可在后续进行推送，亦可实现远端提交历史干净，或为了切分支，或再次同步提交等
   R: 同步提交时产生冲突，冲突解决后，完成解冲突状态，然后进行后续操作
   S: 单笔推送，如本地有多笔未推送的提交，直接推送会将多笔都推送，该选项用来仅推送指定commit-id的提交
   T: 查看代码仓状态
-  E: 清除选项参数
   Q: 退出本次提交流程
+  V: 查看详细修改，确认本次提交修改的具体内容
+  X: 排除文件，去掉本次提交的部分文件
+  Y: 确认本次提交，输入提交信息，如分支、描述、Topic，然后推送到远端仓库
 "
 prompt="
 -------------------------------------------------------------------------------------------------------
@@ -2819,7 +2895,8 @@ prompt_single_push="
                             branch=$current_branch
                         }
                     }
-                    git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $temp_commit_log
+                    tmp_file=$(mktemp)
+                    git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $tmp_file
                     status=${PIPESTATUS[0]}
                     if [[ $status -ne 0 ]]; then
                         echo_c -y "git push fail"
@@ -2835,13 +2912,15 @@ prompt_single_push="
                             unset input && continue
                         fi
                     fi
-                    echo -e "project: "${commit_code_path[$index]} >>$temp_commit_log
                     if [[ $commit_amend_tag = 'yes' ]]; then
-                        echo -e "- Amend Commit""\r\n" >>$temp_commit_log
+                        echo -e "- Amend Commit" >>$temp_commit_log
                     else
-                        echo -e "- New Commit""\r\n" >>$temp_commit_log
+                        echo -e "- New Commit" >>$temp_commit_log
                     fi
-                    echo -e "\r\n" >> $temp_commit_log
+                    echo -e "project: "${commit_code_path[$index]}"\n" >>$temp_commit_log
+                    cat $tmp_file >>$temp_commit_log
+                    echo -e "\n" >>$temp_commit_log
+                    rm -rf $tmp_file
                     [[ $bt = 'S' ]] && {
                         git reset --hard
                         git checkout --detach origin_single_push
@@ -3621,14 +3700,28 @@ function dit-cp {
             status=${PIPESTATUS[0]}
             if [ $status -ne 0 ]; then
                 echo_c -y "cherry-pick Conflict or Failure" |tee -a $DOT_DIT/$CP_LOG
-                hit_option '--test' && git cherry-pick --abort
-                hit_option '--interact' && {
+                if hit_option '--test'; then
+                    git cherry-pick --abort
+                elif hit_option '--interact'; then
                     while true
                     do
                         read -p "To continue press [Y]: " input
-                        [ $input = 'Y' ] && echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG && break
+                        [[ $input = 'Y' ]] && {
+                            git add -u
+                            git cherry-pick --continue
+                            echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG
+                            break
+                        }
                     done
-                }
+                else
+                    echo_c -b "Execute 'dit cp --merge' after resolving the conflict"
+                    read_c -b "or resolve conflicts now [yes]: " input
+                    [[ $input = 'yes' ]] && {
+                        git add -u
+                        git cherry-pick --continue
+                        echo "Resolve Now: Processed Marker" >>$DOT_DIT/$CP_LOG
+                    }
+                fi
             fi
             cd - >/dev/null
         done
@@ -4416,10 +4509,8 @@ commit_count_from_gerrit() {
     rm $temp_file_sort
 }
 env_cfg() {
-    local name=self
     if hit_option '--repo'; then
-        rm -rf .repo/repo
-        git clone https://gerrit.googlesource.com/git-repo .repo/repo
+        curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
     fi
 }
 function dit-tools {
