@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Feb 26 11:03:02 CST 2026 by skull  ver:26.2.26.11.02
+#@create:Thu Feb 26 14:37:49 CST 2026 by skull  ver:26.2.26.14.37
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -1239,22 +1239,25 @@ reduced_product_config() {
     read -p "Please select product or input keyword: " select
     [[ $select = "--find" ]] && simple_select_config && return
     [[ $select = "q" || $select = "Q" ]] && exit 1
-    [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} || {
-        [[ ${enum_config[@]} =~ $select ]] && {
-            local index=0
-            local temp_product=()
-            for value in "${enum_config[@]}"; do
-                if [[ $value == *"$select"* ]]; then
-                    temp_product+=($value)
-                    ((index++))
-                fi
-            done
-            [ $index -gt 1 ] && {
-                enum_config=("${temp_product[@]}")
-                reduced_product_config
-            } || config_select=$value
-        } || simple_select_config $select
-    }
+    [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} && return
+    if [[ ${enum_config[@]} =~ $select ]]; then
+        local index=0
+        local temp_product=()
+        for value in "${enum_config[@]}"; do
+            if [[ $value == *"$select"* ]]; then
+                temp_product+=($value)
+                ((index++))
+            fi
+        done
+        if [ $index -gt 1 ]; then
+            enum_config=("${temp_product[@]}")
+            reduced_product_config
+        else
+            config_select=$temp_product
+        fi
+    else
+        simple_select_config $select
+    fi
 }
 select_config() {
     index=0
@@ -4832,10 +4835,10 @@ UPDATE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/doit"
 VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
 UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
 function dit-update {
-    CURRENT_VERSION=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
+    current_version=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
     if hit_option '-g'; then
         cp ./out/release_dit ./release/doit
-        echo $CURRENT_VERSION >./release/version
+        echo $current_version >./release/version
         echo "no care" >./release/upgrade
         [[ ${EXEC_PARAMS[@]} =~ '--force' ]] && echo "force" >./release/upgrade
         return 0
@@ -4857,10 +4860,10 @@ function dit-update {
         [[ $FORCED_UPGRADE != 'force' ]] && return
     }
     [ $1 = '-b' ] || echo "Checking for updates..."
-    LATEST_VERSION=$(curl -s "$VERSION_URL")
-    [ $last_cmd = '?' ] && echo "new: "$LATEST_VERSION
-    [ $last_cmd = '?' ] && echo "now: "$CURRENT_VERSION
-    compare_version $LATEST_VERSION $CURRENT_VERSION
+    new_version=$(curl -s "$VERSION_URL")
+    [ $last_cmd = '?' ] && echo "new: "$new_version
+    [ $last_cmd = '?' ] && echo "now: "$current_version
+    compare_version $new_version $current_version
     if [[ $? -eq 1 ]]; then
         read -p "New version available: updated? [Y/n]: " input
         [[ $input != 'Y' ]] && return 1
@@ -4869,7 +4872,7 @@ function dit-update {
         if [ $? -eq 0 ]; then
             mv "doit.tmp" ~/.$script_name/$script_name
             chmod +x ~/.$script_name/$script_name
-            echo_c -g "Update successful. Please re-run the script."
+            echo_c -g "Version:$new_version Update successful. Please re-run the script."
             return 0
         else
             echo_c -r "Failed to download the update."
