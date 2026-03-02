@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Feb 26 14:37:49 CST 2026 by skull  ver:26.2.26.14.37
+#@create:Mon Mar  2 16:08:22 CST 2026 by skull  ver:26.3.2.16.08
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -88,7 +88,7 @@ $script_name make [-d] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--r
     -r  release         release版本，缺省为debug版本
     -s  select          选择要构建的项目，缺省则在后面选择
     -v  version         指定版本号，版本号写在最后，缺省则为默认版本号：年.月.日.时.分
-    --firmware-ota       单固件OTA包
+    --firmware-ota      单固件OTA包
     --backup            备份ota，为快速验证
     --restore           还原ota，为快速验证
     --skip              跳过编译，通常用于制作差分包或打固件升级包，如 -t, -fw
@@ -711,17 +711,19 @@ sub_help() {
     rm .$script_name/help.info
 }
 run_env_check() {
-    local error=0
+    local error=1
     local gerrit_name="$GERRIT_USER"
     local gerrit_service="$GERRIT_HOST"
     while :
     do
         [[ -n $gerrit_name || -n $gerrit_service ]] && {
             if ssh -p 29418 $gerrit_name@$gerrit_service 2>&1 |grep "you have successfully connected over SSH" >/dev/null; then
-                [ $do_cmd = "hello" ] && ssh -p 29418 $gerrit_name@$gerrit_service 2>&1 |grep "Hi"
+                [ $do_cmd = "hello" ] && {
+                    ssh -p 29418 $gerrit_name@$gerrit_service 2>&1 |grep "Hi"
+                    error=0
+                }
                 break
             else
-                error=1
                 echo -e "\e[43m" "Hi buddy, there may be a mistake: " $gerrit_name $gerrit_service "\e[0m"
             fi
         }
@@ -729,13 +731,8 @@ run_env_check() {
         [[ $select = 'Y' ]] && return
         read -p "! Tell me gerrit-service name (xxx in gerrit.xxx.com): " gerrit_service
         gerrit_service="gerrit."$gerrit_service".com"
-        if [ $error = 0 ]; then
-            gerrit_name=$(wslvar USERNAME)
-            continue
-        else
-            read -p "! Tell me your name (on Gerrit): " gerrit_name
-            [ -z $gerrit_name ] && gerrit_name=$(wslvar USERNAME)
-        fi
+        read -p "! Tell me your name (on Gerrit): " gerrit_name
+        [ -z $gerrit_name ] && gerrit_name=$(wslvar USERNAME)
     done
     if [ $error = 0 ]; then
         echo $gerrit_name >user
@@ -4698,7 +4695,6 @@ uiframework
 }
 export script_exe_path
 function dit-hello {
-    run_env_check
     echo "working..."
     env_name=$HOME"/.bashrc"
     script_exe_path=$DIT_PATH
