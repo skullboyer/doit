@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Tue Mar  3 11:49:49 CST 2026 by skull  ver:26.3.3.11.49
+#@create:Tue Mar  3 11:56:47 CST 2026 by skull  ver:26.3.3.11.56
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -51,12 +51,12 @@ usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [sta
 
 初始化代码仓库
 $script_name init [-b] [-x] [-j]
-    -b  branch          后跟manifest仓分支，缺省则为master分支
-    -x  xml             后跟要切换的xml配置文件，缺省则为huamiOS.xml
-    -j  jobs            后跟要处理任务的线程数
+    -b  branch          指定manifest仓分支，缺省则为master分支
+    -x  xml             指定要切换的xml配置文件，缺省则为huamiOS.xml
+    -j  jobs            指定要处理任务的线程数
 
 同步代码仓库
-$script_name sync [--depth] [--repo] [--rebase]
+$script_name sync [--depth] [--repo] [--rebase] [--jobs]
     --depth             同步代码前净化代码仓(包括删除未跟踪内容)，不带--repo选项则同步所有仓
         {number}            回滚深度
     --repo              更新的代码仓范围
@@ -64,6 +64,7 @@ $script_name sync [--depth] [--repo] [--rebase]
         [sport]             仅回退运动仓
         [all]               回退所有仓，否则仅回退CP过的代码仓
     --rebase            在当前节点下同步代码附带变基本地提交
+    --jobs              指定要处理任务的线程数
     tips:               缺省参数则仅回退不干净的仓，并更新所有仓
 
 xml操作
@@ -1911,6 +1912,14 @@ function dit-sync {
             return
         fi
     fi
+    jobs=16
+    if hit_option '--jobs'; then
+        get_option_index_and_value --jobs
+        local job=$OPTION_VALUE
+        if [[ -n "$job" ]]; then
+            jobs="$job"
+        fi
+    fi
     if hit_option '--repo'; then
         parse_options --repo
         if ! check_last_cmd; then
@@ -1972,7 +1981,7 @@ function dit-sync {
             done <$temp_file
             rm $temp_file
         }
-        repo sync -d --force-sync -j16
+        repo sync -d --force-sync -j${jobs}
     fi
     [ -f $DOT_DIT/$CP_HISTORY_LOG ] && rm $DOT_DIT/$CP_HISTORY_LOG
     return 0
