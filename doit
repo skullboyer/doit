@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Mar  2 16:08:22 CST 2026 by skull  ver:26.3.2.16.08
+#@create:Tue Mar  3 11:49:49 CST 2026 by skull  ver:26.3.3.11.49
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -50,9 +50,10 @@ cat <<EOFHELP
 usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
 
 初始化代码仓库
-$script_name init [-b] [-x]
+$script_name init [-b] [-x] [-j]
     -b  branch          后跟manifest仓分支，缺省则为master分支
     -x  xml             后跟要切换的xml配置文件，缺省则为huamiOS.xml
+    -j  jobs            后跟要处理任务的线程数
 
 同步代码仓库
 $script_name sync [--depth] [--repo] [--rebase]
@@ -918,9 +919,9 @@ compare_version() {
     for ((i=0; i<len; i++)); do
         local n1=${a1[i]:-0}
         local n2=${a2[i]:-0}
-        if ((n1 > n2)); then
+        if (( 10#$n1 > 10#$n2 )); then
             return 1
-        elif ((n1 < n2)); then
+        elif (( 10#$n1 < 10#$n2 )); then
             return 2
         fi
     done
@@ -1743,13 +1744,21 @@ function dit-init {
             xml_name="$xml"
         fi
     fi
+    jobs=16
+    if hit_option '-j'; then
+        get_option_index_and_value -j
+        local job=$OPTION_VALUE
+        if [[ -n "$job" ]]; then
+            jobs="$job"
+        fi
+    fi
     [ -d .repo/repo ] && rm -rf .repo/repo
     git clone --depth=1 https://github.com/GerritCodeReview/git-repo .repo/repo
     echo_c green "init..."
     echo "branch: $branch_name  xml: ${xml_name}.xml"
     repo init -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
     echo_c green "sync..."
-    repo sync -j16
+    repo sync -j${jobs}
     [ $? != 0 ] && return -1
     init_depend_file
     echo -e "\n\e[42mOver!\e[0m\n"
@@ -2027,14 +2036,15 @@ function dit-make {
                 make clean
                 make distclean
             fi
-            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
-                echo "$last_cmd" |grep [^0-9.] >/dev/null || version=$last_cmd
-            }
             [[ ${EXEC_PARAMS[@]} =~ '-r' ]] && debug_release=release
-            [[ ${EXEC_PARAMS[@]} =~ '--version' ]] && {
-                get_option_index_and_value --version
-                version=$OPTION_VALUE
-                echo "build version: "$version
+            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
+                get_option_index_and_value -v
+                if echo "$OPTION_VALUE" |grep [^0-9.] >/dev/null; then
+                    version=$OPTION_VALUE
+                    echo "build version: "$version
+                else
+                    echo_c -y "Invalid version number input"
+                fi
             }
             deconfig=`find ../ -iname $config_select`
             local temp=$(mktemp)
@@ -2077,7 +2087,7 @@ function dit-make {
         fi
         local make_result=$?
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
-            if [[ "$platform" =~ "mhs003" ]]; then
+            if [[ "$hm_platform" =~ "mhs003" ]]; then
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/init/board_bsd.c
             else
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/board_bsd.c
