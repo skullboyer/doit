@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Tue Mar  3 11:56:47 CST 2026 by skull  ver:26.3.3.11.56
+#@create:Mon Mar 16 10:47:12 CST 2026 by skull  ver:26.3.16.10.47
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -82,9 +82,10 @@ $script_name xml [-s] [-g] [-d]
         new_xml             生成代码差异changelog的新节点xml
 
 构建项目
-$script_name make [-d] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--restore]
+$script_name make [-d] [-l] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--restore]
     -d  delta           增量编译
         --firmware-ota      增量固件OTA包
+    -l  little          编译小核
     -o  ota             ota全量包编译
     -t  tiny            制作差分包
     -r  release         release版本，缺省为debug版本
@@ -587,7 +588,7 @@ test_read_c()
 escape_for_grep() {
     local input="$1"
     local escaped
-    escaped=$(printf '%s' "$input" | sed 's/[][\\\/$*.^|+?(){}"-]/\\&/g')
+    escaped=$(printf '%s' "$input" | sed 's/[][\\\/$*.^|+?(){}"]/\\&/g')
     printf '%s' "$escaped"
 }
 LOG_DEBUG=1
@@ -1456,8 +1457,8 @@ copy_firmware() {
 }
 backup_firmware() {
     [ ! -d .$script_name/bak ] && mkdir .$script_name/bak
-    [ -f .$script_name/bak/indicator.product ] && [ -f build/out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ] && {
-        cp build/out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip .$script_name/bak/`cat .$script_name/bak/indicator.product`
+    [ -f .$script_name/bak/indicator.product ] && [ -f build/out/watch@*/binary/watch@*_ota_sign.zip ] && {
+        cp build/out/watch@*/binary/watch@*_ota_sign.zip .$script_name/bak/`cat .$script_name/bak/indicator.product`
         cp $OTA_VERSION .$script_name/bak/`cat .$script_name/bak/indicator.product`
     }
     for product in ${enum_product_name[@]}
@@ -1465,10 +1466,9 @@ backup_firmware() {
         [[ $1 =~ $product ]] && break
     done
     [ $product = ${enum_product_name[-1]} ] && local product=$(echo "$1" | cut -d '_' -f 2)
-    echo "backup: " $product
     echo $product >.$script_name/bak/indicator.product
     [ ! -d .$script_name/bak/$product ] && mkdir -p .$script_name/bak/$product/diff
-    echo -e "\n\e[42mBackup firmware complete!\e[0m\n" 
+    echo_c -g "Backup ($product) firmware complete!" 
 }
 dircfg() {
     sudo echo "Hi~ $GERRIT_USER"
@@ -1903,6 +1903,8 @@ function dit-xml {
 }
 function dit-sync {
     option_check $arg2
+    [ -f $DOT_DIT/$CP_HISTORY_LOG ] && rm $DOT_DIT/$CP_HISTORY_LOG
+    [ -f $DOT_DIT/$COMMIT_LOG ] && rm $DOT_DIT/$COMMIT_LOG
     if hit_option '--depth'; then
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
@@ -1983,7 +1985,6 @@ function dit-sync {
         }
         repo sync -d --force-sync -j${jobs}
     fi
-    [ -f $DOT_DIT/$CP_HISTORY_LOG ] && rm $DOT_DIT/$CP_HISTORY_LOG
     return 0
 }
 function dit-make {
@@ -2014,21 +2015,19 @@ function dit-make {
         cp $sig_file ./build
     }
     if hit_option '-t'; then
+        local product=`cat .$script_name/bak/indicator.product`
         [[ `pwd` =~ 'build' ]] || cd build
-        [ ! -f ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
-            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@mimxrt595_ota_sign.zip out/watch@mimxrt595/binary/watch@mimxrt595_ota_sign.zip ../.$script_name/bak/$product/diff/watch@mimxrt595_ota_sign.zip
+        [ ! -f ../.$script_name/bak/$product/watch@*_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
+            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip ../.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip
         }
         rm -rf sign.pem
         return
     fi
     [[ ${EXEC_PARAMS[@]} =~ '--skip' ]] || {
+        local hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
             [ ! -f build/.config ] && echo_c -y "!!missing config" && return 1
-            local hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
-            [[ -z "$hm_platform" ]] && {
-                echo_c -r "HMI_BUILD_BOARD not found in build/.config"
-                return -1
-            }
+            [[ -z "$hm_platform" ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return -1
             echo -e "\n**platform: "$hm_platform
             if [[ "$hm_platform" =~ ^mhs003 ]]; then
                 sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/init/board_bsd.c
@@ -2041,9 +2040,24 @@ function dit-make {
             update_watch_product_list $config_select
             backup_firmware $config_select
             cd build
-            if hit_option '-o'; then
-                make clean
-                make distclean
+            if ! hit_option '-o'; then
+                [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                    rsync -a --relative out/watch@$hm_platform/binary ./bk_bin
+                    rsync -a --relative out_hub/sensorhub@$hm_platform/binary ./bk_bin
+                    echo "backup ota-bin ok"
+                }
+            fi
+            make clean
+            make distclean
+            if ! hit_option '-o' && [[ -d bk_bin ]]; then
+                cd bk_bin
+                [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                    rsync -a --relative out/watch@$hm_platform/binary ../
+                    rsync -a --relative out_hub/sensorhub@$hm_platform/binary ../
+                    echo "restore ota-bin ok"
+                }
+                cd - >/dev/null
+                rm -rf bk_bin
             fi
             [[ ${EXEC_PARAMS[@]} =~ '-r' ]] && debug_release=release
             [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
@@ -2072,24 +2086,23 @@ function dit-make {
         echo "delta version: "$version >>$OTA_VERSION
         echo "build info: "$debug_release" by "$GERRIT_USER" @"$(date) >>$OTA_VERSION
         [[ `pwd` =~ 'build' ]] || cd build
+        if [[ $config_select =~ "mhs003" ]] && { hit_option '-l' || hit_option '-o'; }; then
+            local tmp="${config_select#${hm_platform}_}"
+            local product="${tmp%_defconfig}"
+            [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
+            echo "other core: build ${hm_platform}" >>../$OTA_VERSION
+            [ -d out_hub ] && rm -rf out_hub
+            if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
+                make BUILD_DIR=out_hub APPDIR=out_hub; then
+                cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                echo_c -g "Small core compilation completed!\n"
+            else
+                echo_c -r "Little nucleus make failed!"
+                return -2
+            fi
+        fi
         if hit_option '-o'; then
-            [[ $config_select =~ "mhs003" ]] && {
-                local hm_platform=$(grep HMI_BUILD_BOARD .config |awk -F "=" '{print $2}' |tr -d ' "')
-                local tmp="${config_select#${hm_platform}_}"
-                local product="${tmp%_defconfig}"
-                [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
-                echo "other core: build ${hm_platform}" >>../$OTA_VERSION
-                [ -d out_hub ] && rm -rf out_hub
-                if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
-                    make BUILD_DIR=out_hub APPDIR=out_hub; then
-                    cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
-                    cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
-                    echo_c -g "Small core compilation completed!\n"
-                else
-                    echo_c -r "Make failed!"
-                    return -2
-                fi
-            }
             make ota -j16
         else
             make -j16
@@ -2922,14 +2935,13 @@ prompt_single_push="
                         echo "Re-push after inspection"
                         if [[ $bt = 'C' ]]; then
                             git reset
-                            unset input && continue
                         elif [[ $bt = 'S' ]]; then
                             git reset --hard
                             git checkout --detach origin_single_push
                             git branch -D single_push origin_single_push
                             [[ $repo_state -ne 0 ]] && git stash pop
-                            unset input && continue
                         fi
+                        unset input && continue
                     fi
                     if [[ $commit_amend_tag = 'yes' ]]; then
                         echo -e "- Amend Commit" >>$temp_commit_log
@@ -3717,11 +3729,19 @@ function dit-cp {
             echo -e "\n[$cp_num] -"${project_dir[index]}
             (git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/$link $refs && git cherry-pick FETCH_HEAD) 2>&1 |tee -a $DOT_DIT/$CP_LOG
             status=${PIPESTATUS[0]}
+            if hit_option '--test'; then
+                if [ $status -ne 0 ]; then
+                    echo_c -y "cherry-pick Conflict or Failure"
+                else
+                    echo_c -g "cherry-pick Complete"
+                fi
+                git cherry-pick --abort
+                cd - >/dev/null
+                continue
+            fi
             if [ $status -ne 0 ]; then
                 echo_c -y "cherry-pick Conflict or Failure" |tee -a $DOT_DIT/$CP_LOG
-                if hit_option '--test'; then
-                    git cherry-pick --abort
-                elif hit_option '--interact'; then
+                if hit_option '--interact'; then
                     while true
                     do
                         read -p "To continue press [Y]: " input
@@ -4336,8 +4356,8 @@ function changelog_find_owner {
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 local escaped_commit_comment="$(escape_for_grep "$commit_comment")"
                 local change_number=$(grep -E -B 1 "subject: .*$escaped_commit_comment" $temp_file |grep -w 'number:' |cut -d ':' -f2)
-                diagnose_cmd "grep -E -B 1 \"subject: .*$escaped_commit_comment\" $temp_file |grep -w 'number:'"
                 log_assert $? "$line"
+                diagnose_cmd "grep -E -B 1 \"subject: .*$escaped_commit_comment\" $temp_file |grep -w 'number:'"
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_number >$temp_file
             }
@@ -4359,7 +4379,7 @@ function changelog_find_owner {
                 log_assert $? "$line"
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 local jira_number=$(echo $jira_describe | cut -d '>' -f1 | xargs)
-                [ ! $jira_number ] && {
+                [[ ! $jira_number ]] && {
                     jira_number=$(grep 'subject:' $temp_file | cut -d ' ' -f4)
                     log_assert $? "$line"
                     pulse_diagnosis $hit_linenum $line_number "hit line-number"
@@ -4851,7 +4871,7 @@ VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
 UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
 function dit-update {
     current_version=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
-    if hit_option '-g'; then
+    if [[ $do_cmd == 'update' ]] && hit_option '-g'; then
         cp ./out/release_dit ./release/doit
         echo $current_version >./release/version
         echo "no care" >./release/upgrade
