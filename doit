@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Mar 16 10:47:12 CST 2026 by skull  ver:26.3.16.10.47
+#@create:Thu Apr 30 20:13:11 CST 2026 by skull  ver:26.4.30.20.13
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -28,9 +28,10 @@ error_handler() {
 }
 
 exit_handler() {
+    local exit_code=$?
     stop_spin "exit."
     terminal_make
-    exit 0
+    exit $exit_code
 }
 
 trap 'error_handler' ERR
@@ -210,6 +211,7 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [-
         --select            选择应用提交
         --count             统计代码的修改行数，不应用修改
         --squash            为压缩提交准备好分支，一般与选项 interact 一起使用，后续执行push命令推送压缩提交
+        --squash-forget     仅仅执行为压缩提交准备好分支，用于同步提交时忘用--squash选项的场景
         --interact          交互式同步，冲突时待解决后继续
         --test              同步测试，看下有没有冲突
     --undo              撤销同步的修改，缺省参数撤销的是最近一次同步的提交
@@ -243,7 +245,7 @@ $script_name commit [-m] [--log]
 
 推送提交
 $script_name push [--depend] [--squash]
-    --depend            指定推送提交的依赖文件
+    --depend            指定推送提交的依赖文件，文件格式要求 "project repo-path"
     --squash            压缩提交并推送，需配合 cp -m --squash
 
 工具集合
@@ -394,6 +396,7 @@ CP_FAIL="cp.fail"
 CP_ABORT="cp.abort"
 CP_CHECK="cp.check"
 CP_UNDO="cp.undo"
+CP_CONFLICT="cp.conflict"
 REPO_LOG="repo.log"
 REPO_DIFF="repo.diff"
 REPO_STASH="repo.stash"
@@ -415,6 +418,53 @@ dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
 [ -f $DIT_PATH/signature.path ] && sig_file=$(<$DIT_PATH/signature.path) || sig_file="$sign_file_path/sign.pem"
 DEPEND_PATH=$DOT_DIT"/.depend/"
+PYTHON2=${PYTHON2:-/usr/bin/python2.7}
+PYTHON3=${PYTHON3:-/usr/bin/python3.8}
+[[ -x "$PYTHON2" ]] || PYTHON2=$(command -v python2.7 || command -v python2)
+[[ -x "$PYTHON3" ]] || PYTHON3=$(command -v python3.8 || command -v python3)
+run_py2() {
+    "$PYTHON2" "$@"
+}
+run_py3() {
+    "$PYTHON3" "$@"
+}
+LOG_DEBUG=1
+LOG_INFO=2
+LOG_WARNING=3
+LOG_ERROR=4
+LOG_CTRL=$LOG_INFO
+logF() {
+    local log_ctrl=0
+    local log_level="$1"
+    local log_tag="$2"
+    local log_msg="$3"
+    log_tag="${log_tag#tag=}"
+    [ -z $log_tag ] && log_msg="$2"
+    case $log_level in
+        -D)
+            log_level="D"
+            [ $LOG_CTRL -gt $LOG_DEBUG ] && log_ctrl=1
+            ;;
+        -I)
+            log_level="I"
+            [ $LOG_CTRL -gt $LOG_INFO ] && log_ctrl=2
+            ;;
+        -W)
+            log_level="W"
+            [ $LOG_CTRL -gt $LOG_WARNING ] && log_ctrl=3
+            ;;
+        -E)
+            log_level="E"
+            [ $LOG_CTRL -gt $LOG_ERROR ] && log_ctrl=4
+            ;;
+        *)
+            log_tag="$1"
+            log_tag="${log_tag#tag=}"
+            [ -z $log_tag ] && log_msg="$1"
+            ;;
+    esac
+    [ $log_ctrl -eq 0 ] && echo -e "$log_level> $(date '+%Y.%m.%d %H:%M:%S.%3N') ${log_tag:0:16} $log_msg" >>.$script_name/$script_name.log
+}
 echo_cc() {
     local color="$1"
     local text="$2"
@@ -474,47 +524,48 @@ echo_c() {
     [[ -n "$fg_color" ]] && color_code="\033[1;${fg_color}m"  
     [[ -n "$bg_color" ]] && color_code="${color_code}\033[${bg_color}m" 
     echo -e "${color_code}${text}\033[0m"
+    logF -I tag="echo_c" "${text}"
 }
 test_echo_c() {
     echo "========== 基础前景色测试 =========="
-    echo_c -bk "黑色文字 (black)"
-    echo_c -r  "红色文字 (red)"
-    echo_c -g  "绿色文字 (green)"
-    echo_c -y  "黄色文字 (yellow)"
-    echo_c -b  "蓝色文字 (blue)"
-    echo_c -p  "紫色文字 (purple)"
-    echo_c -c  "青色文字 (cyan)"
-    echo_cc -w  "白色文字 (white)"
+    echo_c -bk  "-bk  黑色文字 (black)"
+    echo_c -r   "-r   红色文字 (red)"
+    echo_c -g   "-g   绿色文字 (green)"
+    echo_c -y   "-y   黄色文字 (yellow)"
+    echo_c -b   "-b   蓝色文字 (blue)"
+    echo_c -p   "-p   紫色文字 (purple)"
+    echo_c -c   "-c   青色文字 (cyan)"
+    echo_cc -w  "-w   白色文字 (white)"
     echo ""
     echo "========== 亮色前景测试 =========="
-    echo_c -gry "深灰文字 (gray)"
-    echo_c -br  "亮红文字 (bright red)"
-    echo_c -bg  "亮绿文字 (bright green)"
-    echo_c -by  "亮黄文字 (bright yellow)"
-    echo_c -bb  "亮蓝文字 (bright blue)"
-    echo_c -bp  "亮紫文字 (bright purple)"
-    echo_c -bc  "亮青文字 (bright cyan)"
-    echo_c -bw  "亮白文字 (bright white)"
+    echo_c -gry "-gry  深灰文字 (gray)"
+    echo_c -br  "-br   亮红文字 (bright red)"
+    echo_c -bg  "-bg   亮绿文字 (bright green)"
+    echo_c -by  "-by   亮黄文字 (bright yellow)"
+    echo_c -bb  "-bb   亮蓝文字 (bright blue)"
+    echo_c -bp  "-bp   亮紫文字 (bright purple)"
+    echo_c -bc  "-bc   亮青文字 (bright cyan)"
+    echo_c -bw  "-bw   亮白文字 (bright white)"
     echo ""
     echo "========== 背景色测试 =========="
-    echo_c -w -bg-red    "白字红底"
-    echo_c -y -bg-blue   "黄字蓝底"
-    echo_c -r -bg-green  "红字绿底"
-    echo_c -g -bg-purple "绿字紫底"
-    echo_c -b -bg-yellow "蓝字黄底"
-    echo_c -w -bg-cyan   "白字青底"
+    echo_c -w -bg-red    "-w -bg-red     白字红底"
+    echo_c -y -bg-blue   "-y -bg-blue    黄字蓝底"
+    echo_c -r -bg-green  "-r -bg-green   红字绿底"
+    echo_c -g -bg-purple "-g -bg-purple  绿字紫底"
+    echo_c -b -bg-yellow "-b -bg-yellow  蓝字黄底"
+    echo_c -w -bg-cyan   "-w -bg-cyan    白字青底"
     echo ""
     echo "========== 亮背景测试 =========="
-    echo_c -bk -bg-bright-yellow "黑字亮黄底"
-    echo_c -br -bg-bright-white  "亮红字亮白底"
-    echo_c -by -bg-bright-blue   "亮黄字亮蓝底"
-    echo_c -bp -bg-bright-cyan   "亮紫字亮青底"
+    echo_c -bk -bg-bright-yellow "-bk -bg-bright-yellow  黑字亮黄底"
+    echo_c -br -bg-bright-white  "-br -bg-bright-white   亮红字亮白底"
+    echo_c -by -bg-bright-blue   "-by -bg-bright-blue    亮黄字亮蓝底"
+    echo_c -bp -bg-bright-cyan   "-bp -bg-bright-cyan    亮紫字亮青底"
     echo ""
     echo "========== 混合 & 特殊字符测试 =========="
-    echo_c -by -bg-purple "警告: Disk almost full!"
-    echo_c -br -bg-gray "错误: 无法连接服务器!"
-    echo_c -bg "成功: 文件已保存 ✅"
-    echo_c -c "提示: 请按 Enter 继续..."
+    echo_c -by -bg-purple "-by -bg-purple  警告: Disk almost full!"
+    echo_c -br -bg-gray   "-br -bg-gray    错误: 无法连接服务器!"
+    echo_c -bg            "-bg             成功: 文件已保存 ✅"
+    echo_c -c             "-c              提示: 请按 Enter 继续..."
 }
 read_c() {
     local style="$1"
@@ -541,8 +592,15 @@ read_c() {
         -bm|bright_magenta)        tput setaf 13 ;;
         -bc|bright_cyan)           tput setaf 14 ;;
         -bw|bright_white)          tput setaf 15 ;;
-        -fb|bold)                tput bold ;;
         -fu|underline)           tput smul ;;
+        -fur|underline_red)      tput smul; tput setaf 1 ;;
+        -fug|underline_green)    tput smul; tput setaf 2 ;;
+        -fuy|underline_yellow)   tput smul; tput setaf 3 ;;
+        -fub|underline_blue)     tput smul; tput setaf 4 ;;
+        -fum|underline_magenta)  tput smul; tput setaf 5 ;;
+        -fuc|underline_cyan)     tput smul; tput setaf 6 ;;
+        -fuw|underline_white)    tput smul; tput setaf 7 ;;
+        -fb|bold)                tput bold ;;
         -fbr|bold_red)           tput bold; tput setaf 1 ;;
         -fbg|bold_green)         tput bold; tput setaf 2 ;;
         -fby|bold_yellow)        tput bold; tput setaf 3 ;;
@@ -559,74 +617,45 @@ read_c() {
 }
 test_read_c()
 {
-    read_c -bk  "黑色录入：" input
-    read_c -r   "红色录入：" input
-    read_c -g   "绿色录入：" input
-    read_c -y   "黄色录入：" input
-    read_c -b   "蓝色录入：" input
-    read_c -m   "紫色录入：" input
-    read_c -c   "青色录入：" input
-    read_c -w   "白色录入：" input
-    read_c -bbk "高亮黑色录入：" input
-    read_c -br  "高亮红色录入：" input
-    read_c -bg  "高亮绿色录入：" input
-    read_c -by  "高亮黄色录入：" input
-    read_c -bb  "高亮蓝色录入：" input
-    read_c -bm  "高亮紫色录入：" input
-    read_c -bc  "高亮青色录入：" input
-    read_c -bw  "高亮白色录入：" input
-    read_c -fb  "粗体黑色录入：" input
-    read_c -fu  "下划线录入：" input
-    read_c -fbr "粗体红色录入：" input
-    read_c -fbg "粗体绿色录入：" input
-    read_c -fby "粗体黄色录入：" input
-    read_c -fbb "粗体蓝色录入：" input
-    read_c -fbm "粗体紫色录入：" input
-    read_c -fbc "粗体青色录入：" input
-    read_c -fbw "粗体白色录入：" input
+    echo_c -c "请输入："
+    read_c -bk  "-bk   黑色录入：" input
+    read_c -r   "-r    红色录入：" input
+    read_c -g   "-g    绿色录入：" input
+    read_c -y   "-y    黄色录入：" input
+    read_c -b   "-b    蓝色录入：" input
+    read_c -m   "-m    紫色录入：" input
+    read_c -c   "-c    青色录入：" input
+    read_c -w   "-w    白色录入：" input
+    read_c -bbk "-bbk  高亮黑色录入：" input
+    read_c -br  "-br   高亮红色录入：" input
+    read_c -bg  "-bg   高亮绿色录入：" input
+    read_c -by  "-by   高亮黄色录入：" input
+    read_c -bb  "-bb   高亮蓝色录入：" input
+    read_c -bm  "-bm   高亮紫色录入：" input
+    read_c -bc  "-bc   高亮青色录入：" input
+    read_c -bw  "-bw   高亮白色录入：" input
+    read_c -fu  "-fu   下划线录入："     input
+    read_c -fur "-fur  下划线红色录入：" input
+    read_c -fug "-fug  下划线绿色录入：" input
+    read_c -fuy "-fuy  下划线黄色录入：" input
+    read_c -fub "-fub  下划线蓝色录入：" input
+    read_c -fum "-fum  下划线紫色录入：" input
+    read_c -fuc "-fuc  下划线青色录入：" input
+    read_c -fuw "-fuw  下划线白色录入：" input
+    read_c -fb  "-fb   粗体黑色录入：" input
+    read_c -fbr "-fbr  粗体红色录入：" input
+    read_c -fbg "-fbg  粗体绿色录入：" input
+    read_c -fby "-fby  粗体黄色录入：" input
+    read_c -fbb "-fbb  粗体蓝色录入：" input
+    read_c -fbm "-fbm  粗体紫色录入：" input
+    read_c -fbc "-fbc  粗体青色录入：" input
+    read_c -fbw "-fbw  粗体白色录入：" input
 }
 escape_for_grep() {
     local input="$1"
     local escaped
     escaped=$(printf '%s' "$input" | sed 's/[][\\\/$*.^|+?(){}"]/\\&/g')
     printf '%s' "$escaped"
-}
-LOG_DEBUG=1
-LOG_INFO=2
-LOG_WARNING=3
-LOG_ERROR=4
-LOG_CTRL=$LOG_INFO
-logF() {
-    local log_ctrl=0
-    local log_level="$1"
-    local log_tag="$2"
-    local log_msg="$3"
-    log_tag="${log_tag#tag=}"
-    [ -z $log_tag ] && log_msg="$2"
-    case $log_level in
-        -D)
-            log_level="D"
-            [ $LOG_CTRL -gt $LOG_DEBUG ] && log_ctrl=1
-            ;;
-        -I)
-            log_level="I"
-            [ $LOG_CTRL -gt $LOG_INFO ] && log_ctrl=2
-            ;;
-        -W)
-            log_level="W"
-            [ $LOG_CTRL -gt $LOG_WARNING ] && log_ctrl=3
-            ;;
-        -E)
-            log_level="E"
-            [ $LOG_CTRL -gt $LOG_ERROR ] && log_ctrl=4
-            ;;
-        *)
-            log_tag="$1"
-            log_tag="${log_tag#tag=}"
-            [ -z $log_tag ] && log_msg="$1"
-            ;;
-    esac
-    [ $log_ctrl -eq 0 ] && echo -e "$log_level> $(date '+%Y.%m.%d %H:%M:%S.%3N') ${log_tag:0:16} $log_msg" >>.$script_name/$script_name.log
 }
 log() {
     echo -e "$(date '+%H:%M:%S.%3N') $@"
@@ -792,7 +821,7 @@ option_check() {
 }
 find_closest_option() {
     local input="$1"
-    python3 -c "
+    run_py3 -c "
 import sys
 from difflib import get_close_matches
 input_str = sys.argv[1]
@@ -827,6 +856,7 @@ else:
 " "$input" "${args[*]}"
 }
 options_check() {
+    [[ ${command_whitelist[@]} =~ $do_cmd ]] && return
     help_file=".$script_name/help.info"
     help_info >$help_file
     args=$(grep -n "$script_name $do_cmd" .$script_name/help.info |grep -o '\[.*\]' |sed -e 's/\[//g'|sed -e 's/\]//g')
@@ -888,7 +918,7 @@ spin() {
     local -r spinChars='-\|/'  
     local -r totalChars='4'  
     local i=0
-    rm -f "/tmp/spin_percent"*
+    rm -f "$spin_percent_file"
     while sleep $delay; do
         if [[ -f $spin_percent_file ]]; then
             local percent=$(< $spin_percent_file)
@@ -1347,8 +1377,13 @@ squash_commit_create_branch() {
     while read line
     do
         echo_c -b ": "$line "\n"
-        git -C $line checkout -b squash $origin_branch
-        git -C $line checkout -b squash_draft $origin_branch
+        if hit_option '--squash-forget'; then
+            git -C $line checkout -b squash_draft
+            git -C $line checkout -b squash $origin_branch
+        else
+            git -C $line checkout -b squash $origin_branch
+            git -C $line checkout -b squash_draft $origin_branch
+        fi
         echo ""
     done < $squash_commit_dir
 }
@@ -1712,9 +1747,20 @@ dollar_symbol() {
     echo "\$0 "$0 
     echo "\$n "$1 $2 $3 
 }
+test_version() {
+    get_option_index_and_value -v
+    echo "OPTION_VALUE $OPTION_VALUE"
+    if echo "$OPTION_VALUE" |grep [^0-9.] >/dev/null; then
+        echo "包含非数字和点号的其他字符"
+    fi
+    if echo "$OPTION_VALUE" |grep -E '^[0-9.]+$' >/dev/null; then
+        echo "仅包含数字和点号"
+    fi
+}
 test_instance() {
     shift
     test_read_c
+    test_echo_c
 }
 function dit-clean {
     mv .$script_name/$HANDLE_HISTORY .
@@ -1736,6 +1782,8 @@ function dit-init {
         if [[ -n "$branch" ]]; then
             branch_name="$branch"
         fi
+    else
+        echo_c -y "use default branch: master"
     fi
     xml_name=huamiOS
     if hit_option '-x'; then
@@ -1744,6 +1792,8 @@ function dit-init {
         if [[ -n "$xml" ]]; then
             xml_name="$xml"
         fi
+    else
+        echo_c -y "use default xml: huamiOS"
     fi
     jobs=16
     if hit_option '-j'; then
@@ -1756,7 +1806,7 @@ function dit-init {
     [ -d .repo/repo ] && rm -rf .repo/repo
     git clone --depth=1 https://github.com/GerritCodeReview/git-repo .repo/repo
     echo_c green "init..."
-    echo "branch: $branch_name  xml: ${xml_name}.xml"
+    echo_c -g "branch: $branch_name  xml: ${xml_name}.xml"
     repo init -u ssh://$GERRIT_USER@$GERRIT_HOST:29418/firmware/huamisys/manifest -b $branch_name -m ${xml_name}.xml
     echo_c green "sync..."
     repo sync -j${jobs}
@@ -1989,8 +2039,6 @@ function dit-sync {
 }
 function dit-make {
     option_check $arg2
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python3.8 /usr/bin/python
     [[ ${EXEC_PARAMS[@]} =~ '--backup' ]] && {
         [ -d build/out/watch@*/binary/ota ] && {
             start_spin
@@ -2018,7 +2066,7 @@ function dit-make {
         local product=`cat .$script_name/bak/indicator.product`
         [[ `pwd` =~ 'build' ]] || cd build
         [ ! -f ../.$script_name/bak/$product/watch@*_ota_sign.zip ] && echo -e "\a\e[1;31merror: 没有可供生成差分包的原始文件！" || {
-            python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip ../.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip
+            run_py3 scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip ../.$script_name/bak/$product/diff/watch@${product}_ota_sign.zip
         }
         rm -rf sign.pem
         return
@@ -2034,6 +2082,8 @@ function dit-make {
             else
                 sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/board_bsd.c
             fi
+            config_path=$(< $DECONFIG_PATH)
+            config_select=$(echo ${config_path##*/})
         else
             [ -f $MAKE_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_MENU)
             product_config
@@ -2041,7 +2091,8 @@ function dit-make {
             backup_firmware $config_select
             cd build
             if ! hit_option '-o'; then
-                [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                read_c -y "Do you want to back up OTA-BIN? [yes]: " input
+                [[ $input = yes ]] && [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
                     rsync -a --relative out/watch@$hm_platform/binary ./bk_bin
                     rsync -a --relative out_hub/sensorhub@$hm_platform/binary ./bk_bin
                     echo "backup ota-bin ok"
@@ -2063,10 +2114,10 @@ function dit-make {
             [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
                 get_option_index_and_value -v
                 if echo "$OPTION_VALUE" |grep [^0-9.] >/dev/null; then
+                    echo_c -y "Invalid version number input: $OPTION_VALUE"
+                else
                     version=$OPTION_VALUE
                     echo "build version: "$version
-                else
-                    echo_c -y "Invalid version number input"
                 fi
             }
             deconfig=`find ../ -iname $config_select`
@@ -2102,12 +2153,21 @@ function dit-make {
                 return -2
             fi
         fi
+        fw_ver_mk="build_rules/fw_version.mk"
+        fw_ver_mk_bk="build_rules/dit_fw_version.mk"
+        [[ -f $fw_ver_mk ]] && {
+            cp $fw_ver_mk $fw_ver_mk_bk
+            sed -i '/^\$(error BUILD_FW_VER must be a.b.c.d when FW_VER_STRATEGY=legacy/d' $fw_ver_mk
+        }
         if hit_option '-o'; then
+            echo_c -g "Make OTA"
             make ota -j16
         else
+            echo_c -g "Make"
             make -j16
         fi
         local make_result=$?
+        [[ -f $fw_ver_mk ]] && mv $fw_ver_mk_bk $fw_ver_mk
         if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
             if [[ "$hm_platform" =~ "mhs003" ]]; then
                 sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/init/board_bsd.c
@@ -2123,7 +2183,7 @@ function dit-make {
         [[ `pwd` =~ 'build' ]] || cd build
         cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
         sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
-        python scripts/ota_gen_zip.py
+        run_py3 scripts/ota_gen_zip.py
         mv scripts/temp_ota_gen_zip.py scripts/ota_gen_zip.py
     }
     rm -rf sign.pem
@@ -2132,8 +2192,6 @@ function dit-make {
 }
 function dit-simul {
     option_check $arg2
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python3.8 /usr/bin/python
     if [[ ${EXEC_PARAMS[@]} =~ '--enter' ]]; then
         echo "please input: auth 1, userdata 1"
         ./simulator/tool/shell_client
@@ -2227,8 +2285,6 @@ function dit-simul {
 }
 function dit-gapp {
     option_check $arg3
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python3.8 /usr/bin/python
     product_config
     keyword=.
     [[ ${EXEC_PARAMS[@]} =~ '-c' ]] && {
@@ -2574,6 +2630,11 @@ prompt="
             case $input in
                 Y|M)
                     [[ ! $branch ]] && bt=$input && input=I && continue
+                    [[ -n $bk && $bk != I ]] && {
+                        unset tmp_enter
+                        read_c -c "modify submit information? [yes]: " tmp_enter
+                        [[ $tmp_enter = yes ]] && bt=$input && input=I && continue
+                    }
                     local temp_message=""
                     local result=$(git branch -a| grep "remotes/origin/$branch")
                     [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
@@ -2665,14 +2726,24 @@ prompt="
                     local temp_message=""
                     local editor=$(cat $CFG_IN_DIR/commit.edit 2>/dev/null)
                     editor=${editor:-0}
+                    read_c -y "bug fix [yes]: " editor_input
+                    [[ $editor_input = yes ]] && editor=1
                     case "$editor" in
                         1)
+fix_commit_message="
+fix | - > 
+[关联提交]
+[原因分析]
+[解决方案]
+[自测场景]
+"
                             tmpfile=$(mktemp)
                             echo -e "\nOpening vim... Please edit and save."
+                            printf "%s" "$fix_commit_message" >$tmpfile
                             vim "$tmpfile"
                             temp_message=$(cat "$tmpfile")
                             rm "$tmpfile"
-                            echo "> commit message:"
+                            echo_c -g "> commit message:"
                             echo "temp_message"
                             ;;
                         *)
@@ -2686,7 +2757,7 @@ prompt="
                     echo "(Keep, press 'Enter'. Clean, press 'Space'.)"
                     read -p "> commit topic: " temp_topic
                     [[ $temp_topic ]] && topic=$temp_topic
-                    input=$bt && continue
+                    bk=$input && input=$bt && continue
                     ;;
                 L)
                     local depth=1
@@ -2960,6 +3031,8 @@ prompt_single_push="
                             git stash pop
                         elif [[ $repo_state = 'OVER' ]]; then
                             break
+                        elif [[ $repo_state -eq 0 ]]; then
+                            break
                         fi
                         unset input && continue
                     }
@@ -2995,6 +3068,7 @@ function dit-push {
         push_file=.$script_name/$OPTION_VALUE
         [ ! -f "$push_file" ] && echo_c -y "Missing File: $push_file" && return -1
         readarray -t repo_path < <(cat $push_file | grep -w "^project" | awk -F " " '{print $2}')
+        topic=$(cat $push_file |grep -w "^topic" |awk -F "=" '{print $2}')
     }
     [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
         push_file=.$script_name/$SQUASH_DIR
@@ -3007,12 +3081,24 @@ function dit-push {
         echo_c -b "\n: ${repo_path[$index]}"
         cd ${repo_path[$index]}
         [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
+            if git show-ref --verify --quiet "refs/heads/squash"; then
+                git checkout squash
+            fi
             git branch -v
             while true
             do
-                read -p "confirm branch Y: " input
-                [ $input = 'Y' ] && break
+                unset input
+                read -p "confirm branch [Y], or skip this repo [N], or input switch branch: " input
+                [[ $input = 'N' ]] && break
+                [[ $input = 'Y' ]] && break
+                if git show-ref --verify --quiet "refs/heads/$input"; then
+                    git checkout $input
+                else
+                    echo_c -y "Please check the entered branch"
+                fi
+                git branch -v
             done
+            [[ $input = 'N' ]] && continue
             git merge --squash squash_draft
             while true
             do
@@ -3022,7 +3108,6 @@ function dit-push {
                 [ -n "$message" ] && break
             done
             git commit -m "$message"
-            echo_c -c "(Keep, press 'Enter'. Clean, press 'Space'.)"
             while true
             do
                 read -p "> (should not contain spaces.) commit topic: " temp_topic
@@ -3047,6 +3132,10 @@ function dit-push {
         }
         [[ $enter = 'Y' ]] && {
             git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $DOT_DIT/push.log
+            if hit_option '--squash'; then
+                git checkout --detach squash
+                git branch -D squash squash_draft
+            fi
         }
         cd - >/dev/null
     done
@@ -3311,8 +3400,6 @@ function dit-query {
 }
 function dit-tiny {
     option_check $arg2
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python3.8 /usr/bin/python
     [ ! -f build/sign.pem ] && cp $sig_file ./build
     [[ $arg2 && $arg2 = '-p' ]] && {
         product=$arg3
@@ -3338,7 +3425,7 @@ function dit-tiny {
     echo "target: $target"
     echo "source: $source"
     echo "tiny: $tiny"
-    python scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip $DOT_DIT/bak/$product/diff/watch@${product}_ota_sign.zip
+    run_py3 scripts/ota_gen_diff.py ./sign.pem ../.$script_name/bak/$product/watch@*_ota_sign.zip out/watch@*/binary/watch@*_ota_sign.zip $DOT_DIT/bak/$product/diff/watch@${product}_ota_sign.zip
     cd - >/dev/null
     [ $last_cmd = '-t' ] && copy_firmware
     [[ -d $ota_dir/$product/diff ]] && rm -rf $ota_dir/$product/diff
@@ -3634,9 +3721,9 @@ function dit-cp {
         grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
             ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$arg3 >$SSH_GET
             grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
-                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set topic:$arg3 >$SSH_GET
-                grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
-                    ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set hashtag:$arg3 >$SSH_GET
+                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set topic:"$arg3" >$SSH_GET
+                grep -w "project:" $SSH_GET >$PROCESS_RESULT && ssh_get_topic="$arg3" || {
+                    ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set hashtag:"$arg3" >$SSH_GET
                     grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
                         echo "!!Invalid commit info" && exit -1
                     }
@@ -3667,6 +3754,9 @@ function dit-cp {
             squash_commit_create_branch $branch $SQUASH_DIR
             mv $SQUASH_DIR .$script_name
             rm -rf $SQUASH_DIR.temp
+            if hit_option '--squash-forget'; then
+                return
+            fi
         }
         grep -w "open:" $SSH_GET >.$script_name/cp_project_open.tmp 
         readarray -t commit_opens < <(awk -F ":" '{print $2}' .$script_name/cp_project_open.tmp)
@@ -3679,6 +3769,8 @@ function dit-cp {
         grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.tmp 
         readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.tmp)
         echo "$"$do_cmd" "$arg2" "$arg3"  @"$(date) >.$script_name/$CP_LOG
+        [[ -f $DOT_DIT/$CP_CONFLICT ]] && rm -rf $DOT_DIT/$CP_CONFLICT
+        echo -e "@$(date)\ncherry-pick conflict repo-path\n\ntopic=$ssh_get_topic" >$DOT_DIT/$CP_CONFLICT
         local cp_num=0
         for ((index = ${#link_code_path[@]} - 1; index >= 0 ; index--))
         do
@@ -3732,10 +3824,11 @@ function dit-cp {
             if hit_option '--test'; then
                 if [ $status -ne 0 ]; then
                     echo_c -y "cherry-pick Conflict or Failure"
+                    git cherry-pick --abort
                 else
                     echo_c -g "cherry-pick Complete"
+                    git reset --hard HEAD^
                 fi
-                git cherry-pick --abort
                 cd - >/dev/null
                 continue
             fi
@@ -3749,17 +3842,36 @@ function dit-cp {
                             git add -u
                             git cherry-pick --continue
                             echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG
+                            echo "project $path" >>$DOT_DIT/$CP_CONFLICT
                             break
                         }
                     done
                 else
-                    echo_c -b "Execute 'dit cp --merge' after resolving the conflict"
-                    read_c -b "or resolve conflicts now [yes]: " input
-                    [[ $input = 'yes' ]] && {
+                    read_c -g "resolve conflicts now [yes]: " input
+                    if [[ $input = 'yes' ]]; then
                         git add -u
                         git cherry-pick --continue
                         echo "Resolve Now: Processed Marker" >>$DOT_DIT/$CP_LOG
-                    }
+                        echo "project $path" >>$DOT_DIT/$CP_CONFLICT
+                        unset input
+                        read_c -y "push now [yes]: " input
+                        if [[ $input = 'yes' ]]; then
+                            push_file=$DOT_DIT/$CP_CONFLICT
+                            topic=$(cat $push_file |grep -w "^topic" |awk -F "=" '{print $2}')
+                            if ret=$(get_current_branch); then
+                                branch="$ret"
+                                git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $DOT_DIT/push.log
+                            else
+                                echo_c -p "get_current_branch(): $ret"
+                                echo_c -y "branch unknown"
+                                echo_c -b "Execute 'dit push --depend $DOT_DIT/$CP_LOG' to perform the push"
+                            fi
+                        else
+                            echo_c -b "Execute 'dit push --depend $DOT_DIT/$CP_LOG' to perform the push"
+                        fi
+                    else
+                        echo_c -b "Execute 'dit cp --merge' after resolving the conflict"
+                    fi
                 fi
             fi
             cd - >/dev/null
@@ -3804,20 +3916,20 @@ function map {
     module=$arg4
     case $arg3 in
         --parse)
-            python map_memory_parse_gcc.py $map_file $module |tee .$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file $module |tee .$script_name/map_parse_memory.txt
             ;;
         --find)
-            python map_memory_parse_gcc.py $map_file find $module |tee .$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file find $module |tee .$script_name/map_parse_memory.txt
             ;;
         --exec)
-            python map_memory_parse_gcc.py $map_file find --exe $module |tee .$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file find --exe $module |tee .$script_name/map_parse_memory.txt
             ;;
         --sort)
-            python map_memory_parse_gcc.py $map_file >.$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file >.$script_name/map_parse_memory.txt
             map_sort
             ;;
         *)
-            python map_memory_parse_gcc.py $map_file |tee .$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file |tee .$script_name/map_parse_memory.txt
             ;;
     esac
     rm map_memory_parse_gcc.py
@@ -4554,8 +4666,6 @@ env_cfg() {
 }
 function dit-tools {
     option_check $arg2
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python3.8 /usr/bin/python
     scripts_path="/mnt/f/skull/boyer/dit"
     case $arg2 in
         map)
@@ -4566,7 +4676,7 @@ function dit-tools {
             ;;
         crc)
             cp $scripts_path/gen_crc32.py .
-            python gen_crc32.py $arg3
+            run_py3 gen_crc32.py $arg3
             rm gen_crc32.py
             ;;
         owner)
@@ -4935,8 +5045,6 @@ function cmd_check {
     }
 }
 function BEGIN {
-    sudo rm -rf /usr/bin/python
-    sudo ln -s /usr/bin/python2.7 /usr/bin/python
     [ $do_cmd = 'update' ] || $script_name-update -b
     handle_history_file_order
     run_env_check
