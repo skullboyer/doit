@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Apr 30 20:13:11 CST 2026 by skull  ver:26.4.30.20.13
+#@create:Tue May 26 16:42:07 CST 2026 by skull  ver:26.5.26.16.42
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -29,6 +29,7 @@ error_handler() {
 
 exit_handler() {
     local exit_code=$?
+    stop_spin_bar
     stop_spin "exit."
     terminal_make
     exit $exit_code
@@ -48,7 +49,7 @@ cat <<EOFHELP
 ** 首次使用本脚本，请在脚本文件所在路径下执行命令 ./dit hello，根据提示操作即可 ©skull **
 *****************************************************************************************
 
-usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update]
+usage: $script_name [init] [sync] [xml] [make] [gapp] [simul] [copy] [diff] [stash] [query] [tiny] [branch] [cp] [commit] [push] [cfg] [comple] [code] [clean] [hello] [tools] [git] [update] [version] [v3dl]
 
 初始化代码仓库
 $script_name init [-b] [-x] [-j]
@@ -327,6 +328,14 @@ $script_name update [-g] [-b]
         --force             配置为强制升级
     -b  backend         后台更新，适合周期性检查
 
+查看版本
+$script_name version
+
+烧写固件
+$script_name v3dl [--app] [--ota]
+    --app               烧写小包
+    --ota               烧写全量
+
 EOFHELP
 }
 
@@ -384,32 +393,35 @@ sport_modules=(
 "ui/translations")
 DOT_DIT=$current_path/.$script_name
 DIT_PATH=$HOME/.$script_name
+DIT_EXE=~/.$script_name/$script_name
 CFG_IN_DIR="/etc/dit"
 [ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
 [ -f $CFG_IN_DIR/user ] && GERRIT_USER=$(cat $CFG_IN_DIR/user)
-CODE_INFO="code.info"
-OTA_VERSION="ota.version"
-COMMIT_LOG="commit.log"
-CP_LOG="cp.log"
-CP_HISTORY_LOG="cp_history.log"
-CP_FAIL="cp.fail"
-CP_ABORT="cp.abort"
-CP_CHECK="cp.check"
-CP_UNDO="cp.undo"
-CP_CONFLICT="cp.conflict"
-REPO_LOG="repo.log"
-REPO_DIFF="repo.diff"
-REPO_STASH="repo.stash"
-REPO_STASH_DIFF="repo.stash.diff"
-QUERY_LOG="query.log"
-HANDLE_HISTORY="handle.history"
-MAKE_MENU=$DOT_DIT"/make.product"
-MAKE_SIM_MENU=$DOT_DIT"/make.sim.product"
-CHANGELOG_OUT=$DOT_DIT"/changelog_out"
-BRANCH_RESULT="branch.txt"
-SQUASH_DIR="squash_commit.dir"
-DECONFIG_ORIGIN_VER=$DOT_DIT"/origin.version"
+CODE_INFO=$DOT_DIT/"code.info"
+OTA_VERSION=$DOT_DIT/"ota.version"
+COMMIT_LOG=$DOT_DIT/"commit.log"
+CP_LOG=$DOT_DIT/"cp.log"
+CP_HISTORY_LOG=$DOT_DIT/"cp_history.log"
+CP_FAIL=$DOT_DIT/"cp.fail"
+CP_ABORT=$DOT_DIT/"cp.abort"
+CP_CHECK=$DOT_DIT/"cp.check"
+CP_UNDO=$DOT_DIT/"cp.undo"
+CP_CONFLICT=$DOT_DIT/"cp.conflict"
+CP_PUSH=$DOT_DIT/"cp.push"
+REPO_LOG=$DOT_DIT/"repo.log"
+REPO_DIFF=$DOT_DIT/"repo.diff"
+REPO_STASH=$DOT_DIT/"repo.stash"
+REPO_STASH_DIFF=$DOT_DIT/"repo.stash.diff"
+QUERY_LOG=$DOT_DIT/"query.log"
+HANDLE_HISTORY=$DOT_DIT/"handle.history"
+MAKE_MENU=$DOT_DIT/"make.product"
+MAKE_SIM_MENU=$DOT_DIT/"make.sim.product"
+CHANGELOG_OUT=$DOT_DIT/"changelog_out"
+BRANCH_RESULT=$DOT_DIT/"branch.txt"
+SQUASH_DIR=$DOT_DIT/"squash_commit.dir"
+DECONFIG_ORIGIN_VER=$DOT_DIT/"origin.version"
 DECONFIG_PATH=$DOT_DIT"/deconfig.path"
+LOG_FILE=$DOT_DIT"/dit.log"
 source_dir='build/out/watch@*/binary'
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
@@ -417,7 +429,7 @@ read_dir=/mnt/d/work/code
 dir_cfg=$script_name-dir.cfg
 sign_file_path="/mnt/d/work/sign"
 [ -f $DIT_PATH/signature.path ] && sig_file=$(<$DIT_PATH/signature.path) || sig_file="$sign_file_path/sign.pem"
-DEPEND_PATH=$DOT_DIT"/.depend/"
+DEPEND_PATH=$DOT_DIT/".depend/"
 PYTHON2=${PYTHON2:-/usr/bin/python2.7}
 PYTHON3=${PYTHON3:-/usr/bin/python3.8}
 [[ -x "$PYTHON2" ]] || PYTHON2=$(command -v python2.7 || command -v python2)
@@ -463,7 +475,7 @@ logF() {
             [ -z $log_tag ] && log_msg="$1"
             ;;
     esac
-    [ $log_ctrl -eq 0 ] && echo -e "$log_level> $(date '+%Y.%m.%d %H:%M:%S.%3N') ${log_tag:0:16} $log_msg" >>.$script_name/$script_name.log
+    [ $log_ctrl -eq 0 ] && echo -e "$log_level> $(date '+%Y.%m.%d %H:%M:%S.%3N') ${log_tag:0:16} $log_msg" >>$LOG_FILE
 }
 echo_cc() {
     local color="$1"
@@ -736,6 +748,35 @@ hit_target() {
     contains_element "$1" "$@"
     return $?
 }
+find_keyword_regex() {
+    local pattern="$1"
+    shift                    
+    local combined="$*"      
+    [[ "$combined" =~ $pattern ]] && return 0
+    return 1
+}
+find_keyword() {
+    local pattern="$1"
+    shift                    
+    local combined="$*"      
+    [[ "$combined" =~ "$pattern" ]] && return 0
+    return 1
+}
+find_keyword_glob() {
+    local pattern="$1"
+    shift                    
+    local combined="$*"      
+    [[ "$combined" == *"$pattern"* ]] && return 0
+    return 1
+}
+include_option() {
+    find_keyword "$1" "${EXEC_PARAMS[@]}"
+    return $?
+}
+match_keyword() {
+    strict_contains_element "$1" "$@"
+    return $?
+}
 sub_help() {
     $script help >.$script_name/help.info
     line_number=$(grep -n "$script_name $1" .$script_name/help.info |cut -d ':' -f1)
@@ -912,6 +953,15 @@ progress_bar() {
         sleep 0.5
     done
 }
+pid_bar=0
+start_spin_bar() {
+    progress_bar &
+    pid_bar=$!
+}
+stop_spin_bar() {
+    [ $pid_bar -eq 0 ] && return
+    kill $pid_bar > /dev/null 2>&1
+}
 spin_percent_file="/tmp/spin_percent_$BASHPID"
 spin() {
     local -r delay='0.1'  
@@ -932,10 +982,6 @@ pid=0
 start_spin() {
     spin & 
     pid=$! 
-}
-start_spin_bar() {
-    progress_bar &
-    pid=$!
 }
 stop_spin() {
     [ $pid -eq 0 ] && return
@@ -1211,7 +1257,7 @@ terminal_make() {
     sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$origin_version'"' $current_path/$config_path
 }
 handle_history_file_order() {
-    local handle_history=$DOT_DIT/$HANDLE_HISTORY
+    local handle_history=$HANDLE_HISTORY
     [ ! -d $DOT_DIT ] && mkdir $DOT_DIT
     [ ! -f $handle_history ] && touch $handle_history
     local history_order=""
@@ -1233,6 +1279,11 @@ handle_history_file_order() {
             rm handle_history.tmp
             ;;
     esac
+}
+generate_product_menu() {
+    [ ! -f $MAKE_MENU ] && {
+        printf "%s 0\n" "${enum_config[@]}" >$MAKE_MENU
+    }
 }
 simple_select_config() {
     index=0
@@ -1270,6 +1321,7 @@ reduced_product_config() {
     [[ $select = "--find" ]] && simple_select_config && return
     [[ $select = "q" || $select = "Q" ]] && exit 1
     [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} && return
+    generate_product_menu
     if [[ ${enum_config[@]} =~ $select ]]; then
         local index=0
         local temp_product=()
@@ -1334,16 +1386,16 @@ git_fallback() {
     repo sync -j16
 }
 grep_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee .$script_name/$BRANCH_RESULT
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' && git branch -vv' |tee $BRANCH_RESULT
 }
 grep_active_branch() {
-    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee .$script_name/$BRANCH_RESULT
+    repo forall -p -c 'git branch --show-current |grep -w -q '$1' && git branch -vv' |tee $BRANCH_RESULT
 }
 grep_not_branch() {
-    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee .$script_name/$BRANCH_RESULT
+    repo forall -p -c 'git branch -vv |grep -w -q " "'$1' || git branch -vv' |tee $BRANCH_RESULT
 }
 delete_branch() {
-    repo forall -p -c 'git checkout --detach '$1'; git branch -D '$1'' |tee .$script_name/$BRANCH_RESULT
+    repo forall -p -c 'git checkout --detach '$1'; git branch -D '$1'' |tee $BRANCH_RESULT
 }
 switch_branch() {
     [ -z $1 ] && echo "Please input correct arguments!" && exit -1
@@ -1493,16 +1545,19 @@ copy_firmware() {
 backup_firmware() {
     [ ! -d .$script_name/bak ] && mkdir .$script_name/bak
     [ -f .$script_name/bak/indicator.product ] && [ -f build/out/watch@*/binary/watch@*_ota_sign.zip ] && {
-        cp build/out/watch@*/binary/watch@*_ota_sign.zip .$script_name/bak/`cat .$script_name/bak/indicator.product`
-        cp $OTA_VERSION .$script_name/bak/`cat .$script_name/bak/indicator.product`
+        backup_dir=".$script_name/bak/$(cat .$script_name/bak/indicator.product)"
+        cp build/out/watch@*/binary/watch@*_ota_sign.zip $backup_dir
+        cp build/out/watch@*/binary/watch@*.elf $backup_dir
+        cp build/out/watch@*/binary/watch@*.map $backup_dir
+        cp $OTA_VERSION $backup_dir
     }
     for product in ${enum_product_name[@]}
     do
         [[ $1 =~ $product ]] && break
     done
-    [ $product = ${enum_product_name[-1]} ] && local product=$(echo "$1" | cut -d '_' -f 2)
+    [[ $product = ${enum_product_name[-1]} ]] && local product=$(echo "$1" | cut -d '_' -f 2)
     echo $product >.$script_name/bak/indicator.product
-    [ ! -d .$script_name/bak/$product ] && mkdir -p .$script_name/bak/$product/diff
+    [[ ! -d .$script_name/bak/$product ]] && mkdir -p .$script_name/bak/$product/diff
     echo_c -g "Backup ($product) firmware complete!" 
 }
 dircfg() {
@@ -1586,24 +1641,21 @@ update_product_list() {
     [ ! -f $input_file ] && return
     local query_string="$1"
     local max_lines=9
-    local temp_file="$(mktemp)"
-    local sorted_temp_file="$(mktemp)"
+    local tmp_file="$(mktemp)"
     while IFS=' ' read -r string frequency _; do
         local activated_product=""
         if [[ "$string" == "$query_string" ]]; then
             ((frequency++)) 
             activated_product="<-"
         fi
-        printf "%s %d%s\n" "$string" "$frequency" "${activated_product:+ $activated_product}" >> "$temp_file" 
+        printf "%s %d%s\n" "$string" "$frequency" "${activated_product:+ $activated_product}" >>"$tmp_file"
     done < "$input_file"
-    sort -rn -k2 "$temp_file" > "$sorted_temp_file"
-    if ! grep -q "^$query_string " "$sorted_temp_file"; then
-        head -n "$max_lines" "$sorted_temp_file" > "$temp_file"
-        printf "%s 1 <-\n" "$query_string" >> "$temp_file"
-        mv "$temp_file" "$input_file"
-    else
-        mv "$sorted_temp_file" "$input_file"
+    cat "$tmp_file" >"$input_file"
+    if ! grep -q "^$query_string " "$input_file"; then
+        head -n "$max_lines" "$input_file" >"$tmp_file"
+        printf "%s 1 <-\n" "$query_string" >>"$tmp_file"
     fi
+    sort -rn -k2 "$tmp_file" >"$input_file"
 }
 update_watch_product_list() {
     update_product_list $1 "$MAKE_MENU"
@@ -1640,7 +1692,7 @@ get_active_map_remote_branch() {
 }
 update_code_info() {
     if is_valid_cmd 'init'; then
-        echo $(date) >.$script_name/$CODE_INFO
+        echo $(date) >$CODE_INFO
         branch_name=master
         if hit_option '-b'; then
             get_option_index_and_value -b
@@ -1649,7 +1701,7 @@ update_code_info() {
                 branch_name="$branch"
             fi
         fi
-        echo "branch: "$branch_name >>.$script_name/$CODE_INFO
+        echo "branch: "$branch_name >>$CODE_INFO
         xml_name=huamiOS
         if hit_option '-x'; then
             get_option_index_and_value -x
@@ -1658,9 +1710,9 @@ update_code_info() {
                 xml_name="$xml"
             fi
         fi
-        echo "xml: "$xml_name >>.$script_name/$CODE_INFO
+        echo "xml: "$xml_name >>$CODE_INFO
     elif is_valid_cmd 'sync'; then
-        echo $(date) >.$script_name/$CODE_INFO
+        echo $(date) >$CODE_INFO
         cd .repo/manifests
         if ret=$(get_current_branch); then
             branch="$ret"
@@ -1669,10 +1721,10 @@ update_code_info() {
             branch="unKnown"
         fi
         cd - >/dev/null
-        echo "branch: "$branch >>.$script_name/$CODE_INFO
+        echo "branch: "$branch >>$CODE_INFO
         xml=$(sed -nE "s/.*['\"]([^'\"]*\.xml[^'\"]*)['\"].*/\1/p" .repo/manifest.xml)
         [[ -z $xml ]] && xml="unKnown"
-        echo "xml: "$xml >>.$script_name/$CODE_INFO
+        echo "xml: "$xml >>$CODE_INFO
     fi
 }
 count_code_line_from_gerrit() {
@@ -1763,10 +1815,7 @@ test_instance() {
     test_echo_c
 }
 function dit-clean {
-    mv .$script_name/$HANDLE_HISTORY .
-    mv $MAKE_MENU .
     rm -rf .$script_name
-    mkdir .$script_name && mv $HANDLE_HISTORY .$script_name
     [ $last_cmd = '--all' ] && {
         rm -rf vmmc.bin
         cd build && make clean
@@ -1953,8 +2002,8 @@ function dit-xml {
 }
 function dit-sync {
     option_check $arg2
-    [ -f $DOT_DIT/$CP_HISTORY_LOG ] && rm $DOT_DIT/$CP_HISTORY_LOG
-    [ -f $DOT_DIT/$COMMIT_LOG ] && rm $DOT_DIT/$COMMIT_LOG
+    [ -f $CP_HISTORY_LOG ] && rm $CP_HISTORY_LOG
+    [ -f $COMMIT_LOG ] && rm $COMMIT_LOG
     if hit_option '--depth'; then
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
@@ -1983,7 +2032,7 @@ function dit-sync {
             return
         }
         [[ ${OPTION_VALUE[@]} =~ 'sport' ]] && {
-            local branch=$(grep branch .$script_name/$CODE_INFO |cut -d " " -f2)
+            local branch=$(grep branch $CODE_INFO |cut -d " " -f2)
             for module in "${sport_modules[@]}"; do
                 echo_c -b "  $module"
                 git -C $module reset --hard HEAD~$depth
@@ -1993,12 +2042,12 @@ function dit-sync {
             return
         }
         local sync_file=$(mktemp)
-        if [ -f $DOT_DIT/$CP_CHECK ]; then
-            cat $DOT_DIT/$CP_CHECK |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
-            [[ -z $depth ]] && depth=$(grep -o 'HEAD@{[0-9]*}' $DOT_DIT/$CP_CHECK |sed -E 's/HEAD@\{([0-9]*)\}/\1/' |sort -n |tail -1)
+        if [ -f $CP_CHECK ]; then
+            cat $CP_CHECK |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
+            [[ -z $depth ]] && depth=$(grep -o 'HEAD@{[0-9]*}' $CP_CHECK |sed -E 's/HEAD@\{([0-9]*)\}/\1/' |sort -n |tail -1)
             echo $depth && return
-        elif [ -f $DOT_DIT/$QUERY_LOG ]; then
-            cat $DOT_DIT/$QUERY_LOG |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
+        elif [ -f $QUERY_LOG ]; then
+            cat $QUERY_LOG |grep -w "^project" |awk -F " " '{print $2}' >$sync_file
         else
             echo_c red "!! I think you should execute the cp --check command or the query command"
             return 1
@@ -2091,10 +2140,17 @@ function dit-make {
             backup_firmware $config_select
             cd build
             if ! hit_option '-o'; then
-                read_c -y "Do you want to back up OTA-BIN? [yes]: " input
+                if hit_option '--firmware-ota'; then
+                    input=yes
+                elif [[ -f out/watch@*/binary/watch@*_ota_sign.zip ]]; then
+                    unset input
+                    read_c -y "Do you want to back up OTA-BIN? [yes]: " input
+                fi
                 [[ $input = yes ]] && [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                    start_spin_bar
                     rsync -a --relative out/watch@$hm_platform/binary ./bk_bin
                     rsync -a --relative out_hub/sensorhub@$hm_platform/binary ./bk_bin
+                    stop_spin_bar
                     echo "backup ota-bin ok"
                 }
             fi
@@ -2131,9 +2187,9 @@ function dit-make {
             cd - >/dev/null
             echo $config_select": "$version >$OTA_VERSION
         fi
-        head -n 1 $OTA_VERSION > temp_$OTA_VERSION
+        head -n 1 $OTA_VERSION > ota_version.tmp
         truncate -s 0 $OTA_VERSION
-        mv temp_$OTA_VERSION $OTA_VERSION
+        mv ota_version.tmp $OTA_VERSION
         echo "delta version: "$version >>$OTA_VERSION
         echo "build info: "$debug_release" by "$GERRIT_USER" @"$(date) >>$OTA_VERSION
         [[ `pwd` =~ 'build' ]] || cd build
@@ -2141,7 +2197,7 @@ function dit-make {
             local tmp="${config_select#${hm_platform}_}"
             local product="${tmp%_defconfig}"
             [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
-            echo "other core: build ${hm_platform}" >>../$OTA_VERSION
+            echo "other core: build ${hm_platform}" >>$OTA_VERSION
             [ -d out_hub ] && rm -rf out_hub
             if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
                 make BUILD_DIR=out_hub APPDIR=out_hub; then
@@ -2179,15 +2235,14 @@ function dit-make {
         fi
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
     }
-    [[ ${EXEC_PARAMS[@]} =~ '--firmware-ota' ]] && {
+    if hit_option '--firmware-ota'; then
         [[ `pwd` =~ 'build' ]] || cd build
         cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
         sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
         run_py3 scripts/ota_gen_zip.py
         mv scripts/temp_ota_gen_zip.py scripts/ota_gen_zip.py
-    }
+    fi
     rm -rf sign.pem
-    cd - >/dev/null
     return 0
 }
 function dit-simul {
@@ -2277,7 +2332,7 @@ function dit-simul {
             fi
         fi
         rm -rf ./build/sign.pem
-        echo "build info: "$GERRIT_USER" @"$(date) >../$OTA_VERSION
+        echo "build info: "$GERRIT_USER" @"$(date) >$OTA_VERSION
     else
         echo "!!Please input option argument" && return 1
     fi
@@ -2319,18 +2374,19 @@ function dit-copy {
 }
 split_line="%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
 function apply_patch {
-    REPO_PATCH="repo.patch"
+    REPO_PATCH=$DOT_DIT/"repo.patch"
     [[ ${EXEC_PARAMS[@]} =~ '--repo-diff' ]] && {
         get_option_index_and_value --repo-diff
-        [[ -f $OPTION_VALUE/.$script_name/$REPO_DIFF ]] && cp $OPTION_VALUE/.$script_name/$REPO_DIFF .$script_name/$REPO_PATCH
+        apply_diff=$OPTION_VALUE/.$script_name/"repo.diff"
+        [[ -f $apply_diff ]] && cp $apply_diff $REPO_PATCH
     }
-    [[ ! -f .$script_name/$REPO_PATCH && ! -f .$script_name/$REPO_DIFF ]] && echo -e "\n!!Please exec diff command" && return 1
-    grep -n $split_line .$script_name/$REPO_PATCH | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_PATCH >.$script_name/patch_project.tmp
+    [[ ! -f $REPO_PATCH && ! -f $REPO_DIFF ]] && echo -e "\n!!Please exec diff command" && return 1
+    grep -n $split_line $REPO_PATCH | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' $REPO_PATCH >.$script_name/patch_project.tmp
     grep -w "^project" .$script_name/patch_project.tmp >.$script_name/patch_path_project.tmp
     [ ! -s .$script_name/patch_path_project.tmp ] && echo "** Nothing To Patch" && rm .$script_name/patch*.tmp && return 0
     patch_code_path=`awk -F " " '{print $2}' .$script_name/patch_path_project.tmp`
     [[ ${EXEC_PARAMS[@]} =~ '?' ]] && echo "patch_code_path $patch_code_path"
-    grep -n $split_line .$script_name/$REPO_PATCH |awk -F ":" '{print $1}' |xargs -I{} sed -n '{},$p' .$script_name/$REPO_PATCH >.$script_name/patch_content.tmp
+    grep -n $split_line $REPO_PATCH |awk -F ":" '{print $1}' |xargs -I{} sed -n '{},$p' $REPO_PATCH >.$script_name/patch_content.tmp
     [ ! -s .$script_name/patch_content.tmp ] && echo "** Nothing To Patch Content" && rm .$script_name/patch*.tmp && return 0
     patch_content_number=$(grep -nw "^project" .$script_name/patch_content.tmp |cut -d ':' -f1)
     readarray -t patch_content_number <<<$patch_content_number
@@ -2366,27 +2422,27 @@ function apply_patch {
 }
 function dit-diff {
     option_check $arg2
-    [[ $last_cmd = '--backup' ]] && cp .$script_name/$REPO_DIFF .$script_name/repo_bk.diff && return 0
+    [[ $last_cmd = '--backup' ]] && cp $REPO_DIFF .$script_name/repo_bk.diff && return 0
     [[ $arg2 = '-p' ]] && {
         apply_patch
         return $?
     }
     echo_c -b "diff..."
     start_spin
-    echo "$"$do_cmd" "$arg2"  @"$(date) >.$script_name/$REPO_DIFF
+    echo "$"$do_cmd" "$arg2"  @"$(date) >$REPO_DIFF
     [[ $arg2 = '--cp' ]] && {
-        [ ! -f .$script_name/$CP_LOG ] && echo "! You may need to cherry-pick the code first" && return 1
-        read -ra repo_path < <(awk -F "]:" '{print $2}' .$script_name/$CP_LOG |awk -F '-' '{print $1}' |xargs)
+        [ ! -f $CP_LOG ] && echo "! You may need to cherry-pick the code first" && return 1
+        read -ra repo_path < <(awk -F "]:" '{print $2}' $CP_LOG |awk -F '-' '{print $1}' |xargs)
         for ((index=0; index<${#repo_path[@]}; index++))
         do
             echo -e "\n[$index]- project ${repo_path[$index]}"
-            echo -e "\nproject ${repo_path[$index]}" >>.$script_name/$REPO_DIFF
-            git -C ${repo_path[$index]} show --stat |tee -a .$script_name/$REPO_DIFF
+            echo -e "\nproject ${repo_path[$index]}" >>$REPO_DIFF
+            git -C ${repo_path[$index]} show --stat |tee -a $REPO_DIFF
         done
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
         for ((index=0; index<${#repo_path[@]}; index++))
         do
-            git -C ${repo_path[$index]} diff HEAD >>.$script_name/$REPO_DIFF
+            git -C ${repo_path[$index]} diff HEAD >>$REPO_DIFF
         done
         return
     }
@@ -2464,14 +2520,14 @@ function dit-diff {
         done
     }
     [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && {
-        echo "project .repo/manifests/" >>.$script_name/$REPO_DIFF
-        git -C .repo/manifests diff --stat |tee -a .$script_name/$REPO_DIFF
+        echo "project .repo/manifests/" >>$REPO_DIFF
+        git -C .repo/manifests diff --stat |tee -a $REPO_DIFF
     }
     [[ ! $path_keyword ]] && path_keyword=.
     if [[ $arg2 = '-i' ]]; then
-        repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a .$script_name/$REPO_DIFF
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
-        repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>.$script_name/$REPO_DIFF
+        repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a $REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
+        repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>$REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-a' ]]; then
         repo forall -p -c '
@@ -2479,10 +2535,11 @@ function dit-diff {
                 changed=$(git diff --name-only |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git status --porcelain |nl
+                    git diff --shortstat 
                 fi
             fi
-        ' |tee -a .$script_name/$REPO_DIFF
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        ' |tee -a $REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
         repo forall -p -c '
             if pwd |grep -iq "'"$path_keyword"'"; then
                 changed=$(git diff --name-only |grep -v -e '"$file_exclude"')
@@ -2490,7 +2547,7 @@ function dit-diff {
                     git diff
                 fi
             fi
-        ' >>.$script_name/$REPO_DIFF
+        ' >>$REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-c' ]]; then
         if [[ ${EXEC_PARAMS[@]} =~ '--file' ]]; then
@@ -2503,25 +2560,25 @@ function dit-diff {
                 fi
             done
             echo $type_special
-            repo forall -p -c 'if git status --porcelain |grep -i '"$type_special"' >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
+            repo forall -p -c 'if git status --porcelain |grep -i '"$type_special"' >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
         else
             type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
-            repo forall -p -c 'if git status --porcelain |grep -E "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
+            repo forall -p -c 'if git status --porcelain |grep -E "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
         fi
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-x' ]]; then
         type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
         [ -z $type_special ] && type_special="gapp"
-        repo forall -p -c 'if git diff --name-only |grep -vE "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a .$script_name/$REPO_DIFF
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        repo forall -p -c 'if git diff --name-only |grep -vE "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
         unset file_exclude
     fi
     [ ${#file_exclude[@]} -ne 0 ] && {
         [[ ${EXEC_PARAMS[@]} =~ '--path' ]] && {
-            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a .$script_name/$REPO_DIFF
-            echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
-            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>.$script_name/$REPO_DIFF
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a $REPO_DIFF
+            echo -e "\n\n"$split_line >> $REPO_DIFF
+            repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>$REPO_DIFF
             return 0
         }
         [ $last_cmd = '?' ] && echo -e "\n* exclude file: $(declare -p file_exclude)\n"
@@ -2530,8 +2587,8 @@ function dit-diff {
             if [ -n "$changed" ]; then
                 git diff --stat $changed
             fi
-        ' |tee -a .$script_name/$REPO_DIFF
-        echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+        ' |tee -a $REPO_DIFF
+        echo -e "\n\n"$split_line >> $REPO_DIFF
         [ $last_cmd = '?' ] && echo -e "\n> git diff -- "${type_filter_group[*]} ${file_exclude_diff[*]}
         [[ $arg2 = '-v' ]] && {
             repo forall -p -c '
@@ -2539,25 +2596,25 @@ function dit-diff {
                 if [ -n "$changed" ]; then
                     git diff -- $changed
                 fi
-            ' |tee -a .$script_name/$REPO_DIFF
+            ' |tee -a $REPO_DIFF
         } || {
             repo forall -p -c '
                 changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
                 if [ -n "$changed" ]; then
                     git diff -- $changed
                 fi
-            ' >>.$script_name/$REPO_DIFF
+            ' >>$REPO_DIFF
         }
     }
-    [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && git -C .repo/manifests diff >>.$script_name/$REPO_DIFF
+    [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && git -C .repo/manifests diff >>$REPO_DIFF
     return 0
 }
 function dit-commit {
     option_check $arg2
     [[ $arg2 = '-m' && ! $arg3 ]] && echo -e "\e[43m\e[31m!!Please input commit branch\e[0m" && return -1
     backup_branch=$arg3
-    [ ! -f .$script_name/$REPO_DIFF ] && echo -e "\n!!Please exec diff command" && return 1
-    grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF >.$script_name/commit_project.tmp
+    [ ! -f $REPO_DIFF ] && echo -e "\n!!Please exec diff command" && return 1
+    grep -n $split_line $REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' $REPO_DIFF >.$script_name/commit_project.tmp
     grep -w "^project" .$script_name/commit_project.tmp >.$script_name/commit_path_project.tmp
     [ ! -s .$script_name/commit_path_project.tmp ] && echo "** Nothing To Submit" && rm .$script_name/commit*.tmp && return 0
     commit_code_path=`awk -F " " '{print $2}' .$script_name/commit_path_project.tmp`
@@ -2768,7 +2825,8 @@ fix | - >
                         break
                     done
                     git log -$depth
-                    input=$bt && continue
+                    input=$bt
+                    continue
                     ;;
                 G)
                     [[ $bk = 'R' ]] || git commit --amend --no-edit
@@ -2802,7 +2860,7 @@ fix | - >
                             unset input && continue
                         }
                     fi
-                    local remote_branch=$(grep branch $DOT_DIT/$CODE_INFO |cut -d' ' -f2)
+                    local remote_branch=$(grep branch $CODE_INFO |cut -d' ' -f2)
                     branch=$remote_branch 
                     git checkout -b single_push --track origin/$remote_branch
                     git fetch
@@ -2942,7 +3000,7 @@ prompt_single_push="
                 push)
                     [[ $no_push = "yes" ]] && echo_c yellow "no push" && break
                     if [[ $commit_amend_tag = 'yes' ]]; then
-                        local change_id=$(git log -1 --format=%b |awk -F : '{print $2}' |xargs)
+                        local change_id=$(git log -1 --format=%b |grep Change-Id |awk -F : '{print $2}' |xargs)
                         local ssh_info=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_id)
                         local temp_branch=$(echo "$ssh_info" |grep "branch:" |awk -F " " '{print $2}')
                         echo "amend branch: "$temp_branch
@@ -2969,9 +3027,13 @@ prompt_single_push="
                             branch=$temp_branch
                             break
                         done
-                        local temp_topic=$(echo "$ssh_info" |grep "topic:" |awk -F " " '{print $2}')
-                        echo "amend topic: "${temp_topic[0]}
-                        topic=${temp_topic[0]}
+                        while :
+                        do
+                            local temp_topic=$(echo "$ssh_info" |grep "topic:" |awk -F " " '{print $2}')
+                            echo "amend topic: "${temp_topic[0]}
+                            topic=${temp_topic[0]}
+                            [[ -n topic ]] && break
+                        done
                     fi
                     if ret=$(get_current_branch); then
                         current_branch="$ret"
@@ -3049,38 +3111,44 @@ prompt_single_push="
         arg3=$branch
         cd - >/dev/null
     done
-    local size_commit_log=$(stat -c %s $temp_commit_log)
-    [[ $size_commit_log -gt 0 ]] && {
-        {
-            echo $(date)
-            echo $split_line
-            cat $temp_commit_log
-            [ -f $DOT_DIT/$COMMIT_LOG ] && cat $DOT_DIT/$COMMIT_LOG
-        } > temp
-        mv temp $DOT_DIT/$COMMIT_LOG
+    [[ -f $temp_commit_log ]] && {
+        local size_commit_log=$(stat -c %s $temp_commit_log)
+        [[ $size_commit_log -gt 0 ]] && {
+            {
+                echo $(date)
+                echo $split_line
+                cat $temp_commit_log
+                [ -f $COMMIT_LOG ] && cat $COMMIT_LOG
+            } > temp
+            mv temp $COMMIT_LOG
+        }
+        rm $temp_commit_log
     }
-    rm $temp_commit_log
     return 0
 }
 function dit-push {
     [[ ${EXEC_PARAMS[@]} =~ '--depend' ]] && {
         get_option_index_and_value --depend
-        push_file=.$script_name/$OPTION_VALUE
+        push_file=$OPTION_VALUE
         [ ! -f "$push_file" ] && echo_c -y "Missing File: $push_file" && return -1
         readarray -t repo_path < <(cat $push_file | grep -w "^project" | awk -F " " '{print $2}')
         topic=$(cat $push_file |grep -w "^topic" |awk -F "=" '{print $2}')
     }
-    [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
-        push_file=.$script_name/$SQUASH_DIR
-        [ ! -f "$push_file" ] && echo_c -y "Missing File: $push_file" && return -1
+    if include_option '--squash'; then
+        push_file=$SQUASH_DIR
+        [ ! -f "$push_file" ] && {
+            echo_c -y "Missing File: $push_file"
+            echo "! Please execute the cp -m <commit> --squash*"
+            return -1
+        }
         readarray -t repo_path < <(cat $push_file)
-    }
+    fi
     local branch=master
     for ((index=0; index<${#repo_path[@]}; index++))
     do
         echo_c -b "\n: ${repo_path[$index]}"
         cd ${repo_path[$index]}
-        [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
+        if include_option '--squash'; then
             if git show-ref --verify --quiet "refs/heads/squash"; then
                 git checkout squash
             fi
@@ -3114,7 +3182,9 @@ function dit-push {
                 [ -n "$temp_topic" ] && topic="$temp_topic" && break
                 [ -n "$topic" ] && break
             done
-        } || git show --stat
+        else
+            git show --stat
+        fi
         if ret=$(get_current_branch); then
             current_branch="$ret"
         else
@@ -3131,7 +3201,8 @@ function dit-push {
             enter=Y
         }
         [[ $enter = 'Y' ]] && {
-            git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $DOT_DIT/push.log
+            [[ -z $topic ]] && read -p "topic: " topic
+            git push origin HEAD:refs/for/$branch%topic="$topic" 2>&1 |tee -a $DOT_DIT/push.log
             if hit_option '--squash'; then
                 git checkout --detach squash
                 git branch -D squash squash_draft
@@ -3142,7 +3213,7 @@ function dit-push {
     return 0
 }
 function dit-stash {
-    echo $(date)" : \$$_EXEC_PARAMS" >.$script_name/$REPO_STASH
+    echo $(date)" : \$$_EXEC_PARAMS" >$REPO_STASH
     [ -z "$arg2" ] && {
         one_week_ago=$(date -d "7 days ago" +%s)
         export one_week_ago
@@ -3152,7 +3223,7 @@ function dit-stash {
                     echo \"\$id  \$msg\"
                 fi
             done
-        " |tee -a .$script_name/$REPO_STASH
+        " |tee -a $REPO_STASH
         return
     }
     local comment="."
@@ -3165,9 +3236,9 @@ function dit-stash {
         repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
         read -p "\$ Confirm stash apply above? [Y/N]: " anser
-        echo -e "\n\n"$split_line >>.$script_name/$REPO_STASH
+        echo -e "\n\n"$split_line >>$REPO_STASH
         [[ $anser && $anser = 'Y' ]] && {
-            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a .$script_name/$REPO_STASH
+            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a $REPO_STASH
         }
         if ! hit_option '-d' || ! hit_option '--apply-drop' ]]; then
             return
@@ -3178,12 +3249,12 @@ function dit-stash {
         echo -e "\n"
         read -p "\$ Confirm stash drop all? [Y/N]: " anser
         [[ $anser && $anser = 'Y' ]] && {
-            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a .$script_name/$REPO_STASH
+            repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash drop %" |tee -a $REPO_STASH
         }
         return
     fi
     [ $arg2 = '-v' ] && {
-        repo forall -p -c "git stash list |grep "$comment"" |tee -a .$script_name/$REPO_STASH
+        repo forall -p -c "git stash list |grep "$comment"" |tee -a $REPO_STASH
         return
     }
     [ $arg2 = '--view-summary' ] && {
@@ -3191,18 +3262,18 @@ function dit-stash {
             brief=\$(git stash list --format=\"%gd|%at|%s\" --date=iso |grep "$comment")
             index=\$(git stash list |grep "$comment" |cut -d ':' -f1)
             [ \$index ] && echo \$brief && git stash show \$index
-        }" |tee -a .$script_name/$REPO_STASH
+        }" |tee -a $REPO_STASH
         return
     }
     [ $arg2 = '--view-detail' ] && {
         repo forall -p -c "{
             index=\$(git stash list |grep "$comment" |cut -d ':' -f1)
             [ \$index ] && echo ":"\$index && git show \$index
-        }" >>.$script_name/$REPO_STASH_DIFF
+        }" >>$REPO_STASH_DIFF
         return
     }
     [ $arg2 = '-s' ] && {
-        grep -n $split_line .$script_name/$REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' .$script_name/$REPO_DIFF |tee .$script_name/stash_project.tmp
+        grep -n $split_line $REPO_DIFF | awk -F ":" '{print $1-1}' | xargs -I{} sed -n '1,{}p' $REPO_DIFF |tee .$script_name/stash_project.tmp
         read -p "\$ Confirm stash above all? [Y/N]: " anser
         [[ ! $anser || ($anser != 'N' && $anser != 'Y') ]] && echo "!!Invalid input" && return 1
         [ $anser = 'Y' ] && ansersub='Y'
@@ -3220,7 +3291,7 @@ function dit-stash {
         do
             cd $path
             [ $anser = 'N' ] && git status && read -p "\$ Confirm stash this? [Y/N]: " ansersub
-            [ $ansersub = 'Y' ] && git stash push -m "$comment" |tee -a $DOT_DIT/$REPO_STASH
+            [ $ansersub = 'Y' ] && git stash push -m "$comment" |tee -a $REPO_STASH
             cd - >/dev/null
         done
         echo "Stash Complete!"
@@ -3243,10 +3314,10 @@ function dit-query {
             get_option_index_and_value --branch
             seek_branch=$OPTION_VALUE
         }
-        [ ! -f .$script_name/$QUERY_LOG ] && touch .$script_name/$QUERY_LOG
+        [ ! -f $QUERY_LOG ] && touch $QUERY_LOG
         [[ ${EXEC_PARAMS[@]} =~ '--keep' ]] || {
-            [ -f .$script_name/$QUERY_LOG ] && rm .$script_name/$QUERY_LOG
-            touch .$script_name/$QUERY_LOG
+            [ -f $QUERY_LOG ] && rm $QUERY_LOG
+            touch $QUERY_LOG
         }
         if [ -n "$seek_branch" ]; then
             start_spin
@@ -3258,7 +3329,7 @@ function dit-query {
             export ENV_GERRIT_HOST="$GERRIT_HOST"
             export SEEK_BRANCH="$seek_branch"
             export QUERY_MODE="$query_mode"
-            export ENV_QUERY_LOG="$DOT_DIT/$QUERY_LOG"
+            export ENV_QUERY_LOG="$QUERY_LOG"
             export TMP_FILE=$(mktemp)
             repo forall -p -c ' {
                 short_dir=$(realpath --relative-to="$BASE_DIR" "$PWD")
@@ -3272,7 +3343,7 @@ function dit-query {
                         git show "$commitid" --stat
                     fi
                 fi
-            }' >>.$script_name/$QUERY_LOG
+            }' >>$QUERY_LOG
             cat $TMP_FILE
             rm $TMP_FILE
         else
@@ -3287,14 +3358,14 @@ function dit-query {
                     push_status=\$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set \$query_mode \$commitid |grep rowCount: |awk '{print \$2}')
                     [ \$push_status = 0 ] && [ \$changeid ] && echo \"** No Push: \"\$changeid && git show \$commitid --stat
                 fi
-            }" |tee -a .$script_name/$QUERY_LOG
+            }" |tee -a $QUERY_LOG
         fi
         [[ ${EXEC_PARAMS[@]} =~ '--push' ]] || return 0
     }
     [[ ${EXEC_PARAMS[@]} =~ '--push' ]] && {
-        [ ! -f .$script_name/$QUERY_LOG ] && echo "!! I think you haven't executed the command \"$script_name query -p\" yet." && return -1
-        readarray -t repo_path < <(cat .$script_name/$QUERY_LOG | grep -w "^project" | awk -F " " '{print $2}')
-        readarray -t commit_id < <(cat .$script_name/$QUERY_LOG | grep -w "^commit" | awk -F " " '{print $2}')
+        [ ! -f $QUERY_LOG ] && echo "!! I think you haven't executed the command \"$script_name query -p\" yet." && return -1
+        readarray -t repo_path < <(cat $QUERY_LOG | grep -w "^project" | awk -F " " '{print $2}')
+        readarray -t commit_id < <(cat $QUERY_LOG | grep -w "^commit" | awk -F " " '{print $2}')
         [[ ${#repo_path[@]} != ${#commit_id[@]} ]] && {
             echo -e "\033[43;37m !!The keyword 'project' does not match the number of 'commits' \033[0m"
             return -1
@@ -3388,13 +3459,13 @@ function dit-query {
     if [[ ${EXEC_PARAMS[@]} =~ '--author' ]]; then
         get_option_index_and_value --author
         author=$OPTION_VALUE
-        repo forall -p -c git log --author="$author" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+        repo forall -p -c git log --author="$author" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s" --date=short --no-merges --reverse |tee $REPO_LOG
     elif [[ ${EXEC_PARAMS[@]} =~ '--message' ]]; then
         get_option_index_and_value --message
         message=$OPTION_VALUE
-        repo forall -p -c "git log -$depth --oneline |grep $message" |tee .$script_name/$REPO_LOG
+        repo forall -p -c "git log -$depth --oneline |grep $message" |tee $REPO_LOG
     else
-        repo forall -p -c git log --committer="$GERRIT_USER" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s %n" --date=short --no-merges --reverse |tee .$script_name/$REPO_LOG
+        repo forall -p -c git log --committer="$GERRIT_USER" --since="$(date -d "$depth day ago" +%Y-%m-%d)" --pretty=format:"%an %ad : %h %s %n" --date=short --no-merges --reverse |tee $REPO_LOG
     fi
     return 0
 }
@@ -3475,15 +3546,15 @@ function dit-cp {
                 return -1
             fi
             [[ ${EXEC_PARAMS[@]} =~ 'verbose' ]] && {
-                repo forall -p -c "git log --walk-reflogs --since='$since_time' --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+                repo forall -p -c "git log --walk-reflogs --since='$since_time' --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee $CP_CHECK
             } || {
-                repo forall -p -c "git reflog --since='$since_time' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+                repo forall -p -c "git reflog --since='$since_time' |grep cherry-pick" |tee $CP_CHECK
             }
         else
             [[ $arg3 && $arg3 = 'verbose' ]] && {
-                repo forall -p -c "git log --walk-reflogs --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee .$script_name/$CP_CHECK
+                repo forall -p -c "git log --walk-reflogs --pretty=format:'%h %ad %an %gs' |grep cherry-pick" |tee $CP_CHECK
             } || {
-                repo forall -p -c 'git reflog |grep cherry-pick' |tee .$script_name/$CP_CHECK
+                repo forall -p -c 'git reflog |grep cherry-pick' |tee $CP_CHECK
             }
         fi
         [[ ${EXEC_PARAMS[@]} =~ 'verbose' ]] && {
@@ -3501,34 +3572,34 @@ function dit-cp {
                         hash_array+=($(echo $next_line | awk '{print $1}')) 
                     done
                 fi
-            done <.$script_name/$CP_CHECK
-            echo -e "\n\n"$split_line >>.$script_name/$CP_CHECK
+            done <$CP_CHECK
+            echo -e "\n\n"$split_line >>$CP_CHECK
             for ((i=0; i<${#path_array[@]}; i++)); do
                 echo ${path_array[i]}
                 echo ${hash_array[i]}
                 cd ${path_array[i]}
-                echo -e "\nproject: "${path_array[i]} >>$DOT_DIT/$CP_CHECK
-                git show ${hash_array[i]} >>$DOT_DIT/$CP_CHECK
+                echo -e "\nproject: "${path_array[i]} >>$CP_CHECK
+                git show ${hash_array[i]} >>$CP_CHECK
                 cd - >/dev/null
             done
         }
         [[ ${EXEC_PARAMS[@]} =~ 'push' ]] && {
-            cat .$script_name/$CP_CHECK >.$script_name/$REPO_DIFF
-            echo -e "\n\n"$split_line >> .$script_name/$REPO_DIFF
+            cat $CP_CHECK >$REPO_DIFF
+            echo -e "\n\n"$split_line >> $REPO_DIFF
         }
         return 0
     }
     [ $arg2 = "--fail" ] && {
-        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' |tee .$script_name/$CP_FAIL
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' |tee $CP_FAIL
         return 0
     }
     [ $arg2 = "--abort" ] && {
-        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git cherry-pick --abort; fi' |tee .$script_name/$CP_ABORT
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git cherry-pick --abort; fi' |tee $CP_ABORT
         return 0
     }
     [ $arg2 = "--merge" ] && {
-        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' >.$script_name/$CP_FAIL
-        readarray -t projects < <(grep "^project" .$script_name/$CP_FAIL |cut -d ' ' -f2)
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then git status; fi' >$CP_FAIL
+        readarray -t projects < <(grep "^project" $CP_FAIL |cut -d ' ' -f2)
         for project in "${projects[@]}"; do
             echo_c blue "\n  $project\n"
             cd $project
@@ -3572,8 +3643,8 @@ function dit-cp {
         return 0
     }
     [ $arg2 = "--push" ] && {
-        [ ! -s .$script_name/$CP_CHECK ] && echo_c yellow "! Please execute the --check option first" && return 1
-        readarray -t projects < <(grep "^project" .$script_name/$CP_CHECK |cut -d ' ' -f2)
+        [ ! -s $CP_CHECK ] && echo_c yellow "! Please execute the --check option first" && return 1
+        readarray -t projects < <(grep "^project" $CP_CHECK |cut -d ' ' -f2)
         for project in "${projects[@]}"; do
             echo_c blue "\n  $project\n"
             cd $project
@@ -3622,7 +3693,7 @@ function dit-cp {
         return 0
     }
     [ $arg2 = "--diff" ] && {
-        [ -s .$script_name/$CP_CHECK ] || {
+        [ -s $CP_CHECK ] || {
             echo -e "\033[43;37m !!Execute the --check option first \033[0m"
             return -1
         }
@@ -3643,7 +3714,7 @@ function dit-cp {
                 git clean -df
                 cd - >/dev/null
             }
-        done <.$script_name/$CP_CHECK.tmp
+        done <$CP_CHECK.tmp
         return 0
     }
     [ $arg2 = "--undo" ] && {
@@ -3677,41 +3748,41 @@ function dit-cp {
             rm $PROCESS_RESULT
             return 0
         }
-        [ -f .$script_name/$CP_FAIL ] && rm .$script_name/$CP_FAIL
-        touch .$script_name/$CP_FAIL
-        repo forall -p -c 'if git status |grep -q "cherry-picking"; then pwd >>'$current_path'/.$script_name/$CP_FAIL; fi'
-        wc -l .$script_name/$CP_FAIL >.$script_name/tmp.txt
+        [ -f $CP_FAIL ] && rm $CP_FAIL
+        touch $CP_FAIL
+        repo forall -p -c 'if git status |grep -q "cherry-picking"; then pwd >>$CP_FAIL; fi'
+        wc -l $CP_FAIL >.$script_name/tmp.txt
         cherrypicking=$(awk '{print $1}' .$script_name/tmp.txt)
         rm .$script_name/tmp.txt
-        echo "undo cherry-pick @ "$(date) >.$script_name/$CP_UNDO
+        echo "undo cherry-pick @ "$(date) >$CP_UNDO
         [ $cherrypicking -gt 0 ] && {
             while IFS= read -r line
             do
-                echo -e "\n- $line" |tee -a $DOT_DIT/$CP_UNDO
-                echo "**git cherry-pick --abort" |tee -a .$script_name/$CP_UNDO
+                echo -e "\n- $line" |tee -a $CP_UNDO
+                echo "**git cherry-pick --abort" |tee -a $CP_UNDO
                 cd $line
-                git cherry-pick --abort >>$DOT_DIT/$CP_UNDO 2>&1
+                git cherry-pick --abort >>$CP_UNDO 2>&1
                 git clean -df
                 cd - >/dev/null
-            done <.$script_name/$CP_FAIL
+            done <$CP_FAIL
         }
-        [ -s .$script_name/$CP_CHECK ] || {
+        [ -s $CP_CHECK ] || {
             echo -e "\033[43;37m !!Execute the --check option first \033[0m"
             return -1
         }
-        awk '/^project / {if (NR!=1) print project, count; project=$0; count=0; next} {count+=gsub(/HEAD@/,"&")} END {print project, count}' .$script_name/$CP_CHECK >.$script_name/$CP_CHECK.tmp
+        awk '/^project / {if (NR!=1) print project, count; project=$0; count=0; next} {count+=gsub(/HEAD@/,"&")} END {print project, count}' $CP_CHECK >$CP_CHECK.tmp
         while IFS=' ' read -r -a line
         do
             [[ ${line[0]} = 'project' ]] && {
-                echo -e "\n- ${line[@]}" |tee -a .$script_name/$CP_UNDO
+                echo -e "\n- ${line[@]}" |tee -a $CP_UNDO
                 cd ${line[1]}
-                git log --oneline -${line[2]} |tee -a $DOT_DIT/$CP_UNDO
-                echo "**git reset --hard HEAD~${line[2]}" |tee -a $DOT_DIT/$CP_UNDO
-                git reset --hard HEAD~${line[2]} >>$DOT_DIT/$CP_UNDO 2>&1
+                git log --oneline -${line[2]} |tee -a $CP_UNDO
+                echo "**git reset --hard HEAD~${line[2]}" |tee -a $CP_UNDO
+                git reset --hard HEAD~${line[2]} >>$CP_UNDO 2>&1
                 git clean -df
                 cd - >/dev/null
             }
-        done <.$script_name/$CP_CHECK.tmp
+        done <$CP_CHECK.tmp
         return 0
     }
     [ $arg2 = "-m" ] && {
@@ -3748,12 +3819,11 @@ function dit-cp {
         }' $PROCESS_RESULT) 
         readarray -t code_path <<<$code_path
         [[ ${EXEC_PARAMS[@]} =~ '--squash' ]] && {
-            local branch=$(grep branch .$script_name/$CODE_INFO |cut -d' ' -f2)
-            printf "%s\n" "${code_path[@]}" >$SQUASH_DIR.temp
-            awk '{count[$0]++} END {for (line in count) if (count[line] > 1) print line}' $SQUASH_DIR.temp |sort -u >$SQUASH_DIR
+            local branch=$(grep branch $CODE_INFO |cut -d' ' -f2)
+            printf "%s\n" "${code_path[@]}" >squash_dir.tmp
+            awk '{count[$0]++} END {for (line in count) if (count[line] > 1) print line}' squash_dir.tmp |sort -u >$SQUASH_DIR
             squash_commit_create_branch $branch $SQUASH_DIR
-            mv $SQUASH_DIR .$script_name
-            rm -rf $SQUASH_DIR.temp
+            rm -rf squash_dir.tmp
             if hit_option '--squash-forget'; then
                 return
             fi
@@ -3768,9 +3838,11 @@ function dit-cp {
         readarray -t commit_refs <<<$commit_refs
         grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.tmp 
         readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.tmp)
-        echo "$"$do_cmd" "$arg2" "$arg3"  @"$(date) >.$script_name/$CP_LOG
-        [[ -f $DOT_DIT/$CP_CONFLICT ]] && rm -rf $DOT_DIT/$CP_CONFLICT
-        echo -e "@$(date)\ncherry-pick conflict repo-path\n\ntopic=$ssh_get_topic" >$DOT_DIT/$CP_CONFLICT
+        echo "$"$do_cmd" "$arg2" "$arg3"  @"$(date) >$CP_LOG
+        [[ -f $CP_CONFLICT ]] && rm -rf $CP_CONFLICT
+        echo -e "@$(date)\ncherry-pick conflict repo-path\n\ntopic=$ssh_get_topic" >$CP_CONFLICT
+        [[ -f $CP_PUSH ]] && rm -rf $CP_PUSH
+        echo -e "@$(date)\ncherry-pick need push repo-path\n\ntopic=$ssh_get_topic" >$CP_PUSH
         local cp_num=0
         for ((index = ${#link_code_path[@]} - 1; index >= 0 ; index--))
         do
@@ -3796,7 +3868,7 @@ function dit-cp {
                         if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                             : 
                         else
-                            read -p "Confirm the use of this code [y/n]: " input
+                            read -p "Confirm the use of this code [Y/n]: " input
                             [[ $input != 'Y' ]] && echo "!! Abort" && continue
                         fi
                     }
@@ -3808,18 +3880,23 @@ function dit-cp {
                 if [[ ${EXEC_PARAMS[@]} =~ '--force' ]]; then
                     : 
                 else
-                    read -p "Confirm the use of this code, or abort the rest [y/n/q]: " input
-                    [[ $input = 'q' ]] && echo "!! Abort Rest" && break
-                    [[ $input != 'y' ]] && echo "!! Abort This" && continue
+                    read -p "Confirm the use of this code, or abort the rest [Y/N/Q]: " input
+                    while true
+                    do
+                        [[ $input = 'Y' ]] && break
+                        [[ $input = 'Q' ]] && echo_c -y "!! Abort Rest" && break 2
+                        [[ $input = 'N' ]] && echo_c -y "!! Abort This" && continue 2
+                        read_c -y "Only supports options [Y]apply [N]abort [Q]exit :" input
+                    done
                 fi
             fi
-            echo >>.$script_name/$CP_LOG
-            echo "[$index]: "$path" - "$refs" - "$status >>.$script_name/$CP_LOG
-            echo "@Describe: " $subject >>.$script_name/$CP_LOG
+            echo >>$CP_LOG
+            echo "[$index]: "$path" - "$refs" - "$status >>$CP_LOG
+            echo "@Describe: " $subject >>$CP_LOG
             [[ $path =~ 'firmware/Bluebox' ]] && path="framework/bluebox"
             cd $path
             echo -e "\n[$cp_num] -"${project_dir[index]}
-            (git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/$link $refs && git cherry-pick FETCH_HEAD) 2>&1 |tee -a $DOT_DIT/$CP_LOG
+            (git fetch ssh://$GERRIT_USER@$GERRIT_HOST:29418/$link $refs && git cherry-pick FETCH_HEAD) 2>&1 |tee -a $CP_LOG
             status=${PIPESTATUS[0]}
             if hit_option '--test'; then
                 if [ $status -ne 0 ]; then
@@ -3833,7 +3910,7 @@ function dit-cp {
                 continue
             fi
             if [ $status -ne 0 ]; then
-                echo_c -y "cherry-pick Conflict or Failure" |tee -a $DOT_DIT/$CP_LOG
+                echo_c -y "cherry-pick Conflict or Failure" |tee -a $CP_LOG
                 if hit_option '--interact'; then
                     while true
                     do
@@ -3841,8 +3918,9 @@ function dit-cp {
                         [[ $input = 'Y' ]] && {
                             git add -u
                             git cherry-pick --continue
-                            echo "Interact: Processed Marker" >>$DOT_DIT/$CP_LOG
-                            echo "project $path" >>$DOT_DIT/$CP_CONFLICT
+                            echo "Interact: Processed Marker" >>$CP_LOG
+                            echo "project $path" >>$CP_CONFLICT
+                            echo "project $path" >>$CP_PUSH
                             break
                         }
                     done
@@ -3851,33 +3929,38 @@ function dit-cp {
                     if [[ $input = 'yes' ]]; then
                         git add -u
                         git cherry-pick --continue
-                        echo "Resolve Now: Processed Marker" >>$DOT_DIT/$CP_LOG
-                        echo "project $path" >>$DOT_DIT/$CP_CONFLICT
+                        echo "Resolve Now: Processed Marker" >>$CP_LOG
+                        echo "project $path" >>$CP_CONFLICT
                         unset input
                         read_c -y "push now [yes]: " input
                         if [[ $input = 'yes' ]]; then
-                            push_file=$DOT_DIT/$CP_CONFLICT
+                            push_file=$CP_CONFLICT
                             topic=$(cat $push_file |grep -w "^topic" |awk -F "=" '{print $2}')
                             if ret=$(get_current_branch); then
                                 branch="$ret"
                                 git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $DOT_DIT/push.log
                             else
+                                echo "project $path" >>$CP_PUSH
                                 echo_c -p "get_current_branch(): $ret"
                                 echo_c -y "branch unknown"
-                                echo_c -b "Execute 'dit push --depend $DOT_DIT/$CP_LOG' to perform the push"
+                                echo_c -b "Execute 'dit push --depend $CP_LOG' to perform the push"
                             fi
                         else
-                            echo_c -b "Execute 'dit push --depend $DOT_DIT/$CP_LOG' to perform the push"
+                            echo "project $path" >>$CP_PUSH
+                            echo_c -b "Execute 'dit push --depend $CP_LOG' to perform the push"
                         fi
                     else
+                        echo "project $path" >>$CP_PUSH
                         echo_c -b "Execute 'dit cp --merge' after resolving the conflict"
                     fi
                 fi
+            else
+                echo "project $path" >>$CP_PUSH
             fi
             cd - >/dev/null
         done
-        [ ! -f $DOT_DIT/$CP_HISTORY_LOG ] && touch $DOT_DIT/$CP_HISTORY_LOG
-        (cat $DOT_DIT/$CP_LOG; printf '\n\n'; cat $DOT_DIT/$CP_HISTORY_LOG) >tmp && mv tmp $DOT_DIT/$CP_HISTORY_LOG
+        [ ! -f $CP_HISTORY_LOG ] && touch $CP_HISTORY_LOG
+        (cat $CP_LOG; printf '\n\n'; cat $CP_HISTORY_LOG) >tmp && mv tmp $CP_HISTORY_LOG
         [ $last_cmd = '?' ] || rm $SSH_GET
     }
     return 0
@@ -4965,14 +5048,14 @@ EOF
 }
 function dit-git {
     [[ ${EXEC_PARAMS[@]} =~ '-C' ]] && {
-        ${@:1} |tee .$script_name/$REPO_DIFF
+        ${@:1} |tee $REPO_DIFF
         return
     }
     readarray -t git_repo_dir < <(find . -type d -name ".git" | xargs -I {} dirname {})
-    echo "$"$do_cmd" "$arg2"  @"$(date) >.$script_name/$REPO_DIFF
+    echo "$"$do_cmd" "$arg2"  @"$(date) >$REPO_DIFF
     for dir in "${git_repo_dir[@]}"; do
-        echo -e "\r\n-- project  $dir\r\n" >>.$script_name/$REPO_DIFF
-        git -C $dir ${@:2} >>.$script_name/$REPO_DIFF
+        echo -e "\r\n-- project  $dir\r\n" >>$REPO_DIFF
+        git -C $dir ${@:2} >>$REPO_DIFF
     done
     return 0
 }
@@ -4980,7 +5063,7 @@ UPDATE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/doit"
 VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
 UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
 function dit-update {
-    current_version=$(sed -n '2p' ~/.$script_name/$script_name |awk -F 'ver:' '{print $2}')
+    current_version=$(sed -n '2p' $DIT_EXE |awk -F 'ver:' '{print $2}')
     if [[ $do_cmd == 'update' ]] && hit_option '-g'; then
         cp ./out/release_dit ./release/doit
         echo $current_version >./release/version
@@ -5015,8 +5098,8 @@ function dit-update {
         echo "Updating..."
         curl -s -o "doit.tmp" "$UPDATE_URL"
         if [ $? -eq 0 ]; then
-            mv "doit.tmp" ~/.$script_name/$script_name
-            chmod +x ~/.$script_name/$script_name
+            mv "doit.tmp" $DIT_EXE
+            chmod +x $DIT_EXE
             echo_c -g "Version:$new_version Update successful. Please re-run the script."
             return 0
         else
@@ -5027,6 +5110,22 @@ function dit-update {
     else
         [ $1 = '-b' ] || echo "Already up-to-date."
     fi
+}
+function dit-version {
+    version=$(sed -n '2p' $DIT_EXE |awk -F 'ver:' '{print $2}')
+    echo "ver: "$version
+}
+function dit-v3dl {
+    cd build
+    if hit_option '--app'; then
+        v3dl app
+    elif hit_option '--ota'; then
+        v3dl ota NO_EXTFW
+    else
+        echo_c -r "input error"
+        return 1
+    fi
+    return
 }
 function cmd_check {
     [ ! -d .$script_name ] && mkdir .$script_name
