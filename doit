@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Tue May 26 16:42:07 CST 2026 by skull  ver:26.5.26.16.42
+#@create:Tue Jun 23 09:39:46 CST 2026 by skull  ver:26.6.23.9.39
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -31,13 +31,20 @@ exit_handler() {
     local exit_code=$?
     stop_spin_bar
     stop_spin "exit."
+    exit $exit_code
+}
+
+interrupt_exit_handler() {
+    local exit_code=$?
+    stop_spin_bar
+    stop_spin "exit."
     terminal_make
     exit $exit_code
 }
 
 trap 'error_handler' ERR
 
-trap 'exit_handler' SIGINT
+trap 'interrupt_exit_handler' SIGINT
 
 trap 'exit_handler' EXIT
 
@@ -84,7 +91,7 @@ $script_name xml [-s] [-g] [-d]
         new_xml             生成代码差异changelog的新节点xml
 
 构建项目
-$script_name make [-d] [-l] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--restore]
+$script_name make [-d] [-l] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup] [--restore] [--skip] [--ota]
     -d  delta           增量编译
         --firmware-ota      增量固件OTA包
     -l  little          编译小核
@@ -97,6 +104,7 @@ $script_name make [-d] [-l] [-o] [-t] [-r] [-s] [-v] [--firmware-ota] [--backup]
     --backup            备份ota，为快速验证
     --restore           还原ota，为快速验证
     --skip              跳过编译，通常用于制作差分包或打固件升级包，如 -t, -fw
+    --ota               非ota-make时的全量打包，即无资源变化时全量打包
     tips:               缺省则进行代码编译(不带资源)，会将配置和版本号写入文件ota.version，方便追溯
 
 生成gapp工程
@@ -252,11 +260,12 @@ $script_name push [--depend] [--squash]
 工具集合
 $script_name tools [map] [crc] [display] [owner] [commit] [env]
     map                 解析各功能模块空间占用
-        --parse  module     解析指定模块空间占用，后跟模块名
-        --find  keyword     查看当前项目支持的指定关键字相关的模块，后跟模块关键字
-        --exec  keyword     解析指定关键字相关的模块的空间占用，后跟模块关键字
-        --sort              进行空间占用排序，分 RAM 和 ROM
-        tips:               缺省则解析所有模块的空间占用
+        --find  keyword     查看当前项目支持的指定关键字相关的模块，缺省关键字则列出全部模块
+        --parse-module module  解析指定模块空间占用，缺省模块名则解析所有模块空间占用
+        --parse-variable module  解析指定模块变量空间占用
+        --parse-stack module  解析指定模块任务栈空间占用，缺省模块名则解析所有任务栈空间占用
+        --parse-heap module  解析指定模块堆空间占用
+        --sort              解析所有模块空间占用，并进行按 RAM、ROM 排序
     crc
         {file.gapp}         计算文件crc
     display             查询产品显示尺寸，未指定则查询所有
@@ -397,6 +406,8 @@ DIT_EXE=~/.$script_name/$script_name
 CFG_IN_DIR="/etc/dit"
 [ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
 [ -f $CFG_IN_DIR/user ] && GERRIT_USER=$(cat $CFG_IN_DIR/user)
+DIT_BAK=$DOT_DIT/bak
+DIT_TMP=$DOT_DIT/tmp
 CODE_INFO=$DOT_DIT/"code.info"
 OTA_VERSION=$DOT_DIT/"ota.version"
 COMMIT_LOG=$DOT_DIT/"commit.log"
@@ -422,6 +433,7 @@ SQUASH_DIR=$DOT_DIT/"squash_commit.dir"
 DECONFIG_ORIGIN_VER=$DOT_DIT/"origin.version"
 DECONFIG_PATH=$DOT_DIT"/deconfig.path"
 LOG_FILE=$DOT_DIT"/dit.log"
+TERMINAL_FILE=$DOT_DIT"/terminal.log"
 source_dir='build/out/watch@*/binary'
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
@@ -946,10 +958,21 @@ prompt_tone() {
         let cnt+=1
     done
 }
+init_terminal_fd() {
+    local tty_target=''
+    if [ -n "$ORIG_TTY" ] && [ -w "$ORIG_TTY" ]; then
+        tty_target="$ORIG_TTY"
+    elif [ -w /dev/tty ]; then
+        tty_target='/dev/tty'
+    else
+        tty_target='/dev/null'
+    fi
+    exec 3>"$tty_target"
+}
 progress_bar() {
     while :
     do
-        echo -n '█'
+        echo -n '█' >&3
         sleep 0.5
     done
 }
@@ -972,9 +995,9 @@ spin() {
     while sleep $delay; do
         if [[ -f $spin_percent_file ]]; then
             local percent=$(< $spin_percent_file)
-            printf '\r%s    [%d%%]' "${spinChars:i++%totalChars:1}" "${percent:-0}"
+            printf '\r%s    [%d%%]' "${spinChars:i++%totalChars:1}" "${percent:-0}" >&3
         else
-            printf '%s\r' "${spinChars:i++%totalChars:1}"  
+            printf '%s\r' "${spinChars:i++%totalChars:1}" >&3 
         fi
     done
 }
@@ -1251,14 +1274,20 @@ test_get_option() {
     [[ ${OPTION_VALUE[@]} =~ 'boyer' ]] && echo "OPTION_VALUE: "${OPTION_VALUE[@]}
 }
 terminal_make() {
-    [ ! -f $DECONFIG_PATH ] && return
-    origin_version=$(< $DECONFIG_ORIGIN_VER)
-    config_path=$(< $DECONFIG_PATH)
-    sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$origin_version'"' $current_path/$config_path
+    echo_c -y "Restore configuration in $(pwd)"
+    [[ -f $DECONFIG_PATH ]] && {
+        origin_version=$(< $DECONFIG_ORIGIN_VER)
+        config_path=$(< $DECONFIG_PATH)
+        sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$origin_version'"' $current_path/$config_path
+    }
+    fw_ver_mk=$current_path/build/"build_rules/fw_version.mk"
+    fw_ver_mk_bk=$DIT_TMP/fw_version.mk
+    [[ -f $fw_ver_mk_bk ]] && mv $fw_ver_mk_bk $fw_ver_mk
+    [[ -f $DIT_TMP/board_bsd.file ]] && board_bsd_file=$(< $DIT_TMP/board_bsd.file)
+    [[ -f $DIT_TMP/board_bsd.c ]] && cp $DIT_TMP/board_bsd.c $current_path/$board_bsd_file
 }
 handle_history_file_order() {
     local handle_history=$HANDLE_HISTORY
-    [ ! -d $DOT_DIT ] && mkdir $DOT_DIT
     [ ! -f $handle_history ] && touch $handle_history
     local history_order=""
     [ -f $DOT_DIT/history.cfg ] && $(<$DOT_DIT/history.cfg)
@@ -1558,7 +1587,7 @@ backup_firmware() {
     [[ $product = ${enum_product_name[-1]} ]] && local product=$(echo "$1" | cut -d '_' -f 2)
     echo $product >.$script_name/bak/indicator.product
     [[ ! -d .$script_name/bak/$product ]] && mkdir -p .$script_name/bak/$product/diff
-    echo_c -g "Backup ($product) firmware complete!" 
+    echo_c -g "Backup (.$script_name/bak/$product) firmware complete!" 
 }
 dircfg() {
     sudo echo "Hi~ $GERRIT_USER"
@@ -2067,18 +2096,29 @@ function dit-sync {
         temp_file=$(mktemp)
         export temp_file 
         repo forall -p -c '
-        [ -n "$(git status --porcelain)" ] && {
-            echo "❌ 仓库 [$REPO_PATH] 存在未提交或未跟踪的文件！"
-            echo $REPO_PATH >>$temp_file
+        if [ -n "$(git status --porcelain)" ]; then
+            if [ -n "$(git status |grep cherry-picking)" ]; then
+                echo "❗️ 仓库 [$REPO_PATH]  cherry-picking..."
+                echo "project $REPO_PATH  cherry-picking" >>$temp_file
+            else
+                echo "❌ 仓库 [$REPO_PATH]  存在未提交或未跟踪的文件！"
+                echo "project $REPO_PATH  is not clean" >>$temp_file
+            fi
             git status -s
-        }'
+        fi'
         [ -s $temp_file ] && {
             echo -e "\n"
             read -p "Discard these? [Y/n]: " input
             [[ "$input" != 'Y' ]] && rm $temp_file && return 1
             while IFS= read -r line; do
-                git -C $line reset --hard HEAD
-                git -C $line clean -fd
+                path=$(echo $line |cut -d " " -f2)
+                status=$(echo $line |grep cherry-picking)
+                if [[ -n $status ]]; then
+                    git -C $path cherry-pick --abort
+                else
+                    git -C $path reset --hard HEAD
+                    git -C $path clean -fd
+                fi
             done <$temp_file
             rm $temp_file
         }
@@ -2088,7 +2128,7 @@ function dit-sync {
 }
 function dit-make {
     option_check $arg2
-    [[ ${EXEC_PARAMS[@]} =~ '--backup' ]] && {
+    hit_option '--backup' && {
         [ -d build/out/watch@*/binary/ota ] && {
             start_spin
             [ -d ../firm-bk ] && rm -rf ../firm-bk
@@ -2097,7 +2137,7 @@ function dit-make {
         } || echo -e "\nFirmware ota diectory do not exist!"
         return 0
     }
-    [[ ${EXEC_PARAMS[@]} =~ '--restore' ]] && {
+    hit_option '--restore' && {
         start_spin
         [ -d build/out/watch@* ] && rm -rf build/out/watch@*
         [ -d ../firm-bk/watch@*/binary/ota ] && cp -r ../firm-bk/watch@* build/out || echo -e "\nFirmware ota diectory do not exist!"
@@ -2120,17 +2160,22 @@ function dit-make {
         rm -rf sign.pem
         return
     fi
-    [[ ${EXEC_PARAMS[@]} =~ '--skip' ]] || {
-        local hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
-        if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
+    [ -f build/.config ] && hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
+    hit_option '--skip' || {
+        if hit_option '-d'; then
             [ ! -f build/.config ] && echo_c -y "!!missing config" && return 1
-            [[ -z "$hm_platform" ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return -1
+            [[ -z "$hm_platform" ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return 2
             echo -e "\n**platform: "$hm_platform
             if [[ "$hm_platform" =~ ^mhs003 ]]; then
-                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/init/board_bsd.c
+                board_bsd=platform/board/$hm_platform/init/board_bsd.c
             else
-                sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  platform/board/$hm_platform/board_bsd.c
+                board_bsd=platform/board/$hm_platform/board_bsd.c
             fi
+            [ -d "$DIT_TMP" ] || mkdir -p "$DIT_TMP"
+            cp $board_bsd $DIT_TMP
+            board_bsd_file=$DIT_TMP/board_bsd.file
+            echo $board_bsd >$board_bsd_file
+            sed -i '/.fw_ver       =/c.fw_ver       = "'$version'",'  $board_bsd
             config_path=$(< $DECONFIG_PATH)
             config_select=$(echo ${config_path##*/})
         else
@@ -2139,35 +2184,49 @@ function dit-make {
             update_watch_product_list $config_select
             backup_firmware $config_select
             cd build
+            DIT_BK_BIN=$DIT_BAK/bk_bin
             if ! hit_option '-o'; then
+                local bin_extfw=out/watch@$hm_platform/binary/extfw
                 if hit_option '--firmware-ota'; then
                     input=yes
-                elif [[ -f out/watch@*/binary/watch@*_ota_sign.zip ]]; then
+                elif [[ -d $bin_extfw ]]; then
                     unset input
                     read_c -y "Do you want to back up OTA-BIN? [yes]: " input
                 fi
-                [[ $input = yes ]] && [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                [[ -f $DIT_BK_BIN ]] && {
+                    ver_number=$(head -1 $DIT_BK_BIN/ota.version |cut -d: -f2 |xargs)
+                    new_ver_number=$(head -1 $OTA_VERSION |cut -d: -f2 |xargs)
+                }
+                [[ $input = yes ]] && [[ -d $bin_extfw ]] && [[ $ver_number != $new_ver_number ]] && {
+                    echo "backup ota-bin start"
                     start_spin_bar
-                    rsync -a --relative out/watch@$hm_platform/binary ./bk_bin
-                    rsync -a --relative out_hub/sensorhub@$hm_platform/binary ./bk_bin
+                    rm -rf $DIT_BK_BIN
+                    rsync -a --relative out/watch@$hm_platform/binary $DIT_BK_BIN
+                    [[ -d out_hub/sensorhub@$hm_platform/binary ]] && {
+                        rsync -a --relative out_hub/sensorhub@$hm_platform/binary $DIT_BK_BIN
+                    }
+                    cp $OTA_VERSION .
                     stop_spin_bar
-                    echo "backup ota-bin ok"
                 }
             fi
             make clean
             make distclean
-            if ! hit_option '-o' && [[ -d bk_bin ]]; then
-                cd bk_bin
-                [[ -d out/watch@$hm_platform/binary && -d out_hub/sensorhub@$hm_platform/binary ]] && {
-                    rsync -a --relative out/watch@$hm_platform/binary ../
-                    rsync -a --relative out_hub/sensorhub@$hm_platform/binary ../
+            if ! hit_option '-o' && [[ -d $DIT_BK_BIN ]]; then
+                local binary_res=$DIT_BK_BIN/out/watch@$hm_platform/binary
+                local sensor_binary_res=$DIT_BK_BIN/out_hub/sensorhub@$hm_platform/binary
+                (
+                [[ -d $binary_res ]] && {
+                    cd $DIT_BK_BIN
+                    rsync -a --relative out/watch@$hm_platform/binary $current_path/build
+                    [[ -d $sensor_binary_res ]] && {
+                        rsync -a --relative out_hub/sensorhub@$hm_platform/binary $current_path/build
+                    }
                     echo "restore ota-bin ok"
                 }
-                cd - >/dev/null
-                rm -rf bk_bin
+                )
             fi
-            [[ ${EXEC_PARAMS[@]} =~ '-r' ]] && debug_release=release
-            [[ ${EXEC_PARAMS[@]} =~ '-v' ]] && {
+            hit_option '-r' && debug_release=release
+            hit_option '-v' && {
                 get_option_index_and_value -v
                 if echo "$OPTION_VALUE" |grep [^0-9.] >/dev/null; then
                     echo_c -y "Invalid version number input: $OPTION_VALUE"
@@ -2193,7 +2252,7 @@ function dit-make {
         echo "delta version: "$version >>$OTA_VERSION
         echo "build info: "$debug_release" by "$GERRIT_USER" @"$(date) >>$OTA_VERSION
         [[ `pwd` =~ 'build' ]] || cd build
-        if [[ $config_select =~ "mhs003" ]] && { hit_option '-l' || hit_option '-o'; }; then
+        if hit_option '-l' || [[ $config_select =~ "mhs003s" ]] || { [[ $config_select =~ "mhs003" ]] && hit_option '-o'; }; then
             local tmp="${config_select#${hm_platform}_}"
             local product="${tmp%_defconfig}"
             [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
@@ -2201,8 +2260,15 @@ function dit-make {
             [ -d out_hub ] && rm -rf out_hub
             if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
                 make BUILD_DIR=out_hub APPDIR=out_hub; then
-                cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
-                cp out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                sensorhub_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin
+                sensorhub_sign_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin
+                extfw_path=out/watch@$hm_platform/binary/extfw
+                if hit_option '-o'; then
+                    cp $sensorhub_bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                    cp $sensorhub_sign_bin ../platform/board/${hm_platform}/products/${product}/sensorhub
+                elif [ -d $extfw_path ]; then
+                    cp $sensorhub_sign_bin $extfw_path
+                fi
                 echo_c -g "Small core compilation completed!\n"
             else
                 echo_c -r "Little nucleus make failed!"
@@ -2210,7 +2276,7 @@ function dit-make {
             fi
         fi
         fw_ver_mk="build_rules/fw_version.mk"
-        fw_ver_mk_bk="build_rules/dit_fw_version.mk"
+        fw_ver_mk_bk=$DIT_TMP/fw_version.mk
         [[ -f $fw_ver_mk ]] && {
             cp $fw_ver_mk $fw_ver_mk_bk
             sed -i '/^\$(error BUILD_FW_VER must be a.b.c.d when FW_VER_STRATEGY=legacy/d' $fw_ver_mk
@@ -2223,24 +2289,41 @@ function dit-make {
             make -j16
         fi
         local make_result=$?
-        [[ -f $fw_ver_mk ]] && mv $fw_ver_mk_bk $fw_ver_mk
-        if [[ ${EXEC_PARAMS[@]} =~ '-d' ]]; then
-            if [[ "$hm_platform" =~ "mhs003" ]]; then
-                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/init/board_bsd.c
-            else
-                sed -i '/.fw_ver       =/c\    .fw_ver       = SYSINFO_FIRMWARE_VER,'  ../platform/board/${hm_platform}/board_bsd.c
-            fi
+        [[ -f $fw_ver_mk_bk ]] && mv $fw_ver_mk_bk $fw_ver_mk
+        if hit_option '-d'; then
+            [[ -f $DIT_TMP/board_bsd.file ]] && board_bsd_file=$(< $DIT_TMP/board_bsd.file)
+            [[ -f $DIT_TMP/board_bsd.c ]] && cp $DIT_TMP/board_bsd.c ../$board_bsd_file
         else
             mv $temp $deconfig
         fi
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
     }
-    if hit_option '--firmware-ota'; then
-        [[ `pwd` =~ 'build' ]] || cd build
-        cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
-        sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
-        run_py3 scripts/ota_gen_zip.py
-        mv scripts/temp_ota_gen_zip.py scripts/ota_gen_zip.py
+    DIT_BK_LOCALE=$DIT_BAK/bk_res_locale
+    if hit_option '-o'; then
+        [ -d $DIT_BK_LOCALE ] && rm -rf $DIT_BK_LOCALE
+        hit_option '--ota' && {
+            [[ -z $hm_platform ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return 2
+            res_locale=build/out/watch@$hm_platform/binary/ota/resources/locale/locale.zip
+            [ ! -f $res_locale ] && echo_c -r "resources locale.zip is not exist" && return 3
+            mkdir $DIT_BK_LOCALE && cp $res_locale $DIT_BK_LOCALE
+        }
+    else
+        hit_option '--firmware-ota' && {
+            [[ `pwd` =~ 'build' ]] || cd build
+            cp scripts/ota_gen_zip.py scripts/temp_ota_gen_zip.py
+            sed -i '/hw_major_minor_ver = get_hw_version(config_file)/c\            fw_ver = "'$version'"\n            hw_major_minor_ver = get_hw_version(config_file)' scripts/ota_gen_zip.py
+            run_py3 scripts/ota_gen_zip.py
+            mv scripts/temp_ota_gen_zip.py scripts/ota_gen_zip.py
+        }
+        hit_option '--ota' && {
+            [[ -z $hm_platform ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return 2
+            [[ `pwd` =~ 'build' ]] || cd build
+            [ ! -f $DIT_BK_LOCALE/locale.zip ] && echo_c -r "resources locale.zip is not exist" && return 3
+            res_locale=out/watch@$hm_platform/binary/ota/resources/locale
+            [ -d $res_locale ] && unzip -qo $DIT_BK_LOCALE/locale.zip -d "$res_locale"
+            res_path=out/watch@$hm_platform/binary
+            run_py3 scripts/ota_gen_zip.py $res_path/ota $res_path/extfw $res_path/watch@${hm_platform}_ota.zip sign.pem .config $version
+        }
     fi
     rm -rf sign.pem
     return 0
@@ -2290,19 +2373,19 @@ function dit-simul {
                 while :
                 do
                     read -p "Enter the simulator configuration path: " sim_mk_path
-                    [[ -d "$sim_mk_path" ]] && echo "$sim_mk_path" >"$DIT_PATH/sim.mk.cfg" && break
+                    [[ -d "$sim_mk_path" ]] && echo "$sim_mk_path" >"$DOT_DIT/sim.mk.cfg" && break
                     echo_c -y "The path does not exist, please check"
                 done
             fi
-            if [[ -f "$DIT_PATH/sim.mk.cfg" ]]; then
-                sim_mk_path=$(< "$DIT_PATH/sim.mk.cfg")
+            if [[ -f "$DOT_DIT/sim.mk.cfg" ]]; then
+                sim_mk_path=$(< "$DOT_DIT/sim.mk.cfg")
                 product_config "$sim_mk_path"
                 sim_config_select=$config_select
                 [ -f $MAKE_SIM_MENU ] && readarray -t enum_config < <(cut -d' ' -f1 $MAKE_SIM_MENU)
                 product_config
                 update_sim_product_list $config_select
             else
-                product_config "configs/simulator"
+                product_config "simulator/configs"
             fi
             cd build
             if [[ ${EXEC_PARAMS[@]} =~ '-o' ]]; then
@@ -2542,10 +2625,8 @@ function dit-diff {
         echo -e "\n\n"$split_line >> $REPO_DIFF
         repo forall -p -c '
             if pwd |grep -iq "'"$path_keyword"'"; then
-                changed=$(git diff --name-only |grep -v -e '"$file_exclude"')
-                if [ -n "$changed" ]; then
-                    git diff
-                fi
+                changed=$(git status -s |grep -v -e '"$file_exclude"')
+                i[ -n "$changed" ] && git diff
             fi
         ' >>$REPO_DIFF
         unset file_exclude
@@ -2583,28 +2664,22 @@ function dit-diff {
         }
         [ $last_cmd = '?' ] && echo -e "\n* exclude file: $(declare -p file_exclude)\n"
         repo forall -p -c '
-            changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-            if [ -n "$changed" ]; then
-                git diff --stat $changed
-            fi
+            changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
+            [ -n "$changed" ] && echo "$changed"
         ' |tee -a $REPO_DIFF
         echo -e "\n\n"$split_line >> $REPO_DIFF
         [ $last_cmd = '?' ] && echo -e "\n> git diff -- "${type_filter_group[*]} ${file_exclude_diff[*]}
-        [[ $arg2 = '-v' ]] && {
+        if [[ $arg2 = '-v' ]]; then
             repo forall -p -c '
-                changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-                if [ -n "$changed" ]; then
-                    git diff -- $changed
-                fi
+                changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
+                [ -n "$changed" ] && echo "$changed"
             ' |tee -a $REPO_DIFF
-        } || {
+        else
             repo forall -p -c '
-                changed=$(git diff --name-only |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-                if [ -n "$changed" ]; then
-                    git diff -- $changed
-                fi
+                changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
+                [ -n "$changed" ] && git diff
             ' >>$REPO_DIFF
-        }
+        fi
     }
     [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && git -C .repo/manifests diff >>$REPO_DIFF
     return 0
@@ -2675,7 +2750,7 @@ prompt="
         git status
         branch=$arg3
         local no_push="no"
-        local commit_s_cmd=''
+        local commit_type=''
         local commit_amend_tag='no'
         while true
         do
@@ -2788,7 +2863,7 @@ prompt="
                     case "$editor" in
                         1)
 fix_commit_message="
-fix | - > 
+fix | - >
 [关联提交]
 [原因分析]
 [解决方案]
@@ -2841,30 +2916,31 @@ fix | - >
                     no_push="yes"
                     ;;
                 S)
-                    [[ -z $commit_s_cmd ]] && {
+                    [[ -z $commit_type ]] && {
                         echo_c -p "(press F to find, press Enter and empty as new commit)"
                         read -p "Enter the commit ID to be pushed: " commit_id
-                        [[ -z $commit_id ]] && commit_s_cmd='NEW' && bt=$input && input=I && continue
+                        [[ -z $commit_id ]] && commit_type='NEW' && bt=$input && input=I && continue
                     }
                     [[ $commit_id = 'F' ]] && bt=$input && input='L' && continue
-                    git branch origin_single_push
+                    [[ $commit_id = '0' ]] && {
+                        commit_id=$(git log -1 --oneline |cut -d ' ' -f1)
+                    }
                     git diff --quiet && git diff --cached --quiet
                     repo_state=$?
                     if [[ $repo_state -ne 0 ]]; then
                         git stash
                     else
-                        [[ $commit_s_cmd = 'NEW' ]] && {
+                        [[ $commit_type = 'NEW' ]] && {
                             echo_c -y "There is no content to submit"
-                            git checkout --detach origin_single_push
-                            git branch -D origin_single_push
                             unset input && continue
                         }
                     fi
+                    git branch origin_single_push
                     local remote_branch=$(grep branch $CODE_INFO |cut -d' ' -f2)
                     branch=$remote_branch 
                     git checkout -b single_push --track origin/$remote_branch
                     git fetch
-                    [[ -z $commit_s_cmd ]] && {
+                    [[ -z $commit_type ]] && {
                         git cherry-pick $commit_id
                         [ $? -ne 0 ] && {
                             echo_c -y "!!cherry-pick代码冲突"
@@ -2889,17 +2965,22 @@ fix | - >
                                 [[ $enter = 'yes' ]] && break
                             done
                         }
-                        [[ $commit_s_cmd = 'NEW' ]] && git add -u
+                        [[ $commit_type = 'NEW' ]] && git add -u
 help_single_push="
--------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------
   A: 添加要提交的文件
   X: 排除要提交的文件
   T: 查看当前仓状态
   V: 查看已添加的文件细节
+  C: 确认提交，非新提交则追加，执行完后继续停在当前仓
+  L: 同'C'，差别在执行完后进入下一个仓
+  Q: 放弃操作，停在当前仓等待操作
+  J: 跳过工作区修改，仅推送历史提交，停在当前仓等待操作
 "
 prompt_single_push="
-************************************************************************************************************************
- 'A' add file, 'X' exclude file, 'T' view status, 'V' view diff, 'C' confirm commit, 'L' last once , 'Q' quit and abort
+**********************************************************************************
+ 'A' add file          'X' exclude file    'T' view status       'V' view diff
+ 'C' confirm commit    'L' last once       'Q' quit and abort    'J' jump new
 "
                         while true
                         do
@@ -2919,6 +3000,7 @@ prompt_single_push="
                                     git status
                                     ;;
                                 T)
+                                    git rev-parse --show-toplevel
                                     git log -1
                                     git status
                                     ;;
@@ -2948,11 +3030,11 @@ prompt_single_push="
                                         echo_c -y "Merge conflicts exist, need to resolve"
                                         continue
                                     fi
-                                    [[ -z $commit_s_cmd ]] && {
+                                    [[ -z $commit_type ]] && {
                                         commit_amend_tag='yes'
                                         git commit --amend --no-edit
                                     }
-                                    [[ $commit_s_cmd = 'NEW' ]] && git commit -m "$message"
+                                    [[ $commit_type = 'NEW' ]] && git commit -m "$message"
                                     repo_state='GOON'
                                     [[ $choice = 'L' ]] && {
                                         repo_state='OVER'
@@ -2966,13 +3048,14 @@ prompt_single_push="
                                     git stash pop
                                     unset input && break
                                     ;;
+                                J) repo_state='GOON' && break;;
                                 *)
                                     echo_c -bg-white "$help_single_push"
                                     ;;
                             esac
                         done
                     fi
-                    unset commit_s_cmd
+                    unset commit_type
                     [ -z "$input" ] && continue
                     [ -n "$input" ] && bt=$input && input="push" && continue
                     ;;
@@ -3992,27 +4075,51 @@ function map_sort {
     rm $temp_file
 }
 function map {
-    start_spin
-    map_file=$(find . -type f -name "watch@*.map")
-    [ ! map_file ] && echo -e "\n!!No compiled map file found" && exit 0
-    cp $scripts_path/map_memory_parse_gcc.py .
+    mapfile -d '' files < <(find . -type f -name "watch@*.map" -print0)
+    count=${#files[@]}
+    if [[ $count -eq 0 ]]; then
+        echo_c -y "!!No compiled map file found"
+        return 1
+    elif [[ $count -gt 1 ]]; then
+        echo "找到 $count 个匹配的 .map 文件，请选择："
+        for i in "${!files[@]}"; do
+            echo "$((i+1)))> ${files[$i]}"
+        done
+        while true; do
+            read -p "请输入序号 (1-$count): " choice
+            if is_number "$choice" && [[ $choice -ge 1 ]] && [[ $choice -le $count ]]; then
+                map_file="${files[$((choice-1))]}"
+                break
+            else
+                echo "输入无效，请输入 1 到 $count 之间的数字。"
+            fi
+        done
+    else
+        map_file="${files[0]}"
+    fi
+    cp $scripts_path/py/map_memory_parse_gcc.py .
+    option=$arg3
     module=$arg4
-    case $arg3 in
-        --parse)
-            run_py3 map_memory_parse_gcc.py $map_file $module |tee .$script_name/map_parse_memory.txt
-            ;;
+    start_spin
+    case $option in
         --find)
-            run_py3 map_memory_parse_gcc.py $map_file find $module |tee .$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file $option $module |tee .$script_name/map_parse_memory.txt
             ;;
-        --exec)
-            run_py3 map_memory_parse_gcc.py $map_file find --exe $module |tee .$script_name/map_parse_memory.txt
+        --parse-module)
+            run_py3 map_memory_parse_gcc.py $map_file $option $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --parse-variable)
+            run_py3 map_memory_parse_gcc.py $map_file $option $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --parse-stack)
+            run_py3 map_memory_parse_gcc.py $map_file $option $module |tee .$script_name/map_parse_memory.txt
+            ;;
+        --parse-heap)
+            run_py3 map_memory_parse_gcc.py $map_file $option $module |tee .$script_name/map_parse_memory.txt
             ;;
         --sort)
-            run_py3 map_memory_parse_gcc.py $map_file >.$script_name/map_parse_memory.txt
+            run_py3 map_memory_parse_gcc.py $map_file --parse-module >.$script_name/map_parse_memory.txt
             map_sort
-            ;;
-        *)
-            run_py3 map_memory_parse_gcc.py $map_file |tee .$script_name/map_parse_memory.txt
             ;;
     esac
     rm map_memory_parse_gcc.py
@@ -5130,7 +5237,7 @@ function dit-v3dl {
 function cmd_check {
     [ ! -d .$script_name ] && mkdir .$script_name
     [[ ! $do_cmd ]] && {
-        echo -e "\a\n!!! Please enter the correct command."
+        echo_c -y "Please enter the correct command.\ninput:$*"
         exit 1
     } || {
         [ $do_cmd = "help" ] && help_info && exit 0
@@ -5175,12 +5282,41 @@ function END {
     [[ $last_cmd = '?' ]] || rm -f $DOT_DIT/*.tmp
     exit 0
 }
+function write_terminal_to_file {
+    local only_out=0
+    local original_tty=''
+    [ -d "$DOT_DIT" ] || mkdir -p "$DOT_DIT"
+    if [ -z "$ORIG_TTY" ]; then
+        if original_tty=$(tty 2>/dev/null) && [[ $original_tty == /dev/* ]]; then
+            export ORIG_TTY="$original_tty"
+        fi
+    fi
+    if [ $only_out = 1 ]; then
+        exec > >(tee -a "$TERMINAL_FILE") 2>&1
+    else
+        if [ -z "$SCRIPT" ]; then
+            export SCRIPT=1  
+            local flush=0
+            local script_cmd
+            printf -v script_cmd '%q ' "$0" "$@"
+            script_cmd=${script_cmd% }
+            if [ $flush = 0 ]; then
+                exec script -q -a -c "$script_cmd" "$TERMINAL_FILE"
+            else
+                exec script -q -a -f -c "$script_cmd" "$TERMINAL_FILE"
+            fi
+        fi
+    fi
+    echo -e "\n@@"$(date +"%Y-%m-%d %H:%M:%S") >>"$TERMINAL_FILE"
+}
 function main {
+    write_terminal_to_file "$@"
+    init_terminal_fd
     cmd_check
     options_check
     [[ $last_cmd = '$' ]] && exit 0
     BEGIN
-    $script_name-$do_cmd $@
+    $script_name-$do_cmd "$@"
     END
 }
-main $@
+main "$@"
