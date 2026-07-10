@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Tue Jun 23 09:39:46 CST 2026 by skull  ver:26.6.23.9.39
+#@create:Fri Jul 10 20:17:04 CST 2026 by skull  ver:26.7.10.20.17
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -65,7 +65,7 @@ $script_name init [-b] [-x] [-j]
     -j  jobs            指定要处理任务的线程数
 
 同步代码仓库
-$script_name sync [--depth] [--repo] [--rebase] [--jobs]
+$script_name sync [--depth] [--repo] [--rebase] [--time] [--jobs]
     --depth             同步代码前净化代码仓(包括删除未跟踪内容)，不带--repo选项则同步所有仓
         {number}            回滚深度
     --repo              更新的代码仓范围
@@ -73,6 +73,9 @@ $script_name sync [--depth] [--repo] [--rebase] [--jobs]
         [sport]             仅回退运动仓
         [all]               回退所有仓，否则仅回退CP过的代码仓
     --rebase            在当前节点下同步代码附带变基本地提交
+    --time              同步代码到指定时间节点最近的一次提交
+                            绝对时间：HH:MM, YYYY-MM-DD, YYYY-MM-DD HH, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
+                            相对时间：1s: second ago, 1m, 1h, 1d, 1w, 1mo, 1y
     --jobs              指定要处理任务的线程数
     tips:               缺省参数则仅回退不干净的仓，并更新所有仓
 
@@ -231,7 +234,7 @@ $script_name cp [-m] [--undo] [--check] [--fail] [--abort] [--merge] [--push] [-
         [push]              将check结果写入$REPO_DIFF准备提交
         {time}              查看指定深度的同步提交，使用方法 1：time [n] 或 time=n，2：不使用time 则需要将时间深度作为最后一个参数
                                 绝对时间：HH:MM, YYYY-MM-DD, YYYY-MM-DD HH, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS
-                                相对时间：1h: 1 hours ago, 1d: 1 days ago, 1w: 1 weeks ago
+                                相对时间：1s: second ago, 1m, 1h, 1d, 1w, 1mo, 1y
     --fail              检查同步失败的提交
     --abort             丢弃同步失败的提交
     --merge             解决完同步的冲突后，完成提交
@@ -370,7 +373,8 @@ BUILD_TYPE=release
 version=`date +"%y.%-m.%-d.%-H.%M"`
 debug_release=debug
 enum_config=(
-mhs003_munich_defconfig
+mhs003s_atlas_defconfig
+mhs003s_munich_defconfig
 mhs003_makalu_defconfig
 mhs003_rocky_defconfig
 mhs003_rimo_defconfig
@@ -434,7 +438,6 @@ DECONFIG_ORIGIN_VER=$DOT_DIT/"origin.version"
 DECONFIG_PATH=$DOT_DIT"/deconfig.path"
 LOG_FILE=$DOT_DIT"/dit.log"
 TERMINAL_FILE=$DOT_DIT"/terminal.log"
-source_dir='build/out/watch@*/binary'
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
 read_dir=/mnt/d/work/code
@@ -1327,7 +1330,7 @@ simple_select_config() {
             temp_config[num]=$file
             num=`expr $num + 1`
         done
-        [ ! $file ] && echo -e "\nProduct name is incorrect, please re-enter!" && simple_select_config && break
+        [ ! $file ] && echo -e "\nProduct name is incorrect, please re-enter!\ncurrent path: $(pwd)" && simple_select_config && break
         echo "q: exit"
         read -p "Please select product: " select
         [ $select = "q" ] && exit 0
@@ -1518,14 +1521,17 @@ copy_firmware() {
         }
     }
     parse_dirctory
-    source_dir=`echo $source_dir`
+    bin_dir='build/out/watch@*/binary'
+    sensor_bin_dir='build/out_hub/sensorhub@*/binary'
+    bin_path=$(echo $bin_dir)
+    sensor_bin_path=$(echo $sensor_bin_dir)
     [ $last_cmd = '-C' ] && last_cmd=$(cat .$script_name/bak/indicator.product)
     parent_dir=$(basename $(pwd))
     product_ota_dir=$ota_dir/$parent_dir
-    [[ -d $source_dir ]] && {
+    [[ -d $bin_path ]] && {
         [[ ${EXEC_PARAMS[@]} =~ '--fast' ]] && {
             [ ! -d $product_ota_dir ] && mkdir -p $product_ota_dir
-            cp $source_dir/ota/resources/Application.* $product_ota_dir/$last_cmd
+            cp $bin_path/ota/resources/Application.* $product_ota_dir/$last_cmd
             return 0
         }
         [[ ${EXEC_PARAMS[@]} =~ '-t' ]] && {
@@ -1534,10 +1540,14 @@ copy_firmware() {
             mkdir $product_ota_dir/$last_cmd
             echo "copying..."
             start_spin_bar
-            cp $source_dir/watch@*_sign.zip $product_ota_dir/$last_cmd
-            cp $source_dir/watch@*.elf $product_ota_dir/$last_cmd
+            [ -d $sensor_bin_path ] && {
+                cp $sensor_bin_path/sensorhub@*.elf $product_ota_dir/$last_cmd
+                rm $product_ota_dir/$last_cmd/sensorhub@*.*.elf
+            }
+            cp $bin_path/watch@*_sign.zip $product_ota_dir/$last_cmd
+            cp $bin_path/watch@*.elf $product_ota_dir/$last_cmd
             rm $product_ota_dir/$last_cmd/watch@*.*.elf
-            cp $source_dir/watch@*.map $product_ota_dir/$last_cmd
+            cp $bin_path/watch@*.map $product_ota_dir/$last_cmd
             cp $OTA_VERSION $product_ota_dir/$last_cmd
             echo -e "\n! ""OTA: "$product_ota_dir"/"$last_cmd
         } || {
@@ -1545,9 +1555,9 @@ copy_firmware() {
             [[ ${EXEC_PARAMS[@]} =~ '-o' ]] && {
                 echo "copying..." && progress_bar &
                 [ -d $flash_dir/$last_cmd/firmwarebin ] && {
-                    cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
+                    cp $bin_path/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
                 } || {
-                    cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd
+                    cp $bin_path/watch@mimxrt595.bin $flash_dir/$last_cmd
                     mv $flash_dir/$last_cmd/watch@mimxrt595.bin $flash_dir/$last_cmd/firmware_sign.bin
                 }
             } || {
@@ -1555,13 +1565,13 @@ copy_firmware() {
                     [ ! -d $flash_dir/$last_cmd ] && echo "!!Make sure the burn directory exists" && exit -1
                     echo "copying..."
                     start_spin_bar
-                    cp -rf $source_dir/ramdump $flash_dir/$last_cmd/gt3_res/system
-                    cp -rf $source_dir/extfw $flash_dir/$last_cmd/gt3_res/system
-                    cp -rf $source_dir/ota/* $flash_dir/$last_cmd/gt3_res/system
+                    cp -rf $bin_path/ramdump $flash_dir/$last_cmd/gt3_res/system
+                    cp -rf $bin_path/extfw $flash_dir/$last_cmd/gt3_res/system
+                    cp -rf $bin_path/ota/* $flash_dir/$last_cmd/gt3_res/system
                     [ -d $flash_dir/$last_cmd/firmwarebin ] && {
-                        cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
+                        cp $bin_path/watch@mimxrt595.bin $flash_dir/$last_cmd/firmwarebin/firmware.bin
                     } || {
-                        cp $source_dir/watch@mimxrt595.bin $flash_dir/$last_cmd
+                        cp $bin_path/watch@mimxrt595.bin $flash_dir/$last_cmd
                         mv $flash_dir/$last_cmd/watch@mimxrt595.bin $flash_dir/$last_cmd/firmware_sign.bin
                     }
                 }
@@ -2033,6 +2043,24 @@ function dit-sync {
     option_check $arg2
     [ -f $CP_HISTORY_LOG ] && rm $CP_HISTORY_LOG
     [ -f $COMMIT_LOG ] && rm $COMMIT_LOG
+    if hit_option '--time'; then
+        get_option_index_and_value --time
+        input_time=$OPTION_VALUE
+        [ -z "$input_time" ] && echo_c -y "please enter the time" && return 1
+        if ! _time=$(time_result $input_time); then
+            echo "$_time"
+            echo_c -y "Please enter a valid time"
+            return 2
+        fi
+        tmp_data=$(repo forall -p -c 'git status -s')
+        [[ -n $tmp_data ]] && echo_c -y "repo is dirty" && echo "$tmp_data" && return 3
+        repo sync
+        repo forall -p -c "
+            commit_id=\$(git log --date=format:'%Y-%m-%d %H:%M:%S' --pretty=format:'%ad %h' --before='$_time' | head -n 1 | cut -d ' ' -f3)
+            [ -n \"\$commit_id\" ] && git checkout \"\$commit_id\" >/dev/null 2>&1\
+        "
+        return
+    fi
     if hit_option '--depth'; then
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
@@ -2185,7 +2213,7 @@ function dit-make {
             backup_firmware $config_select
             cd build
             DIT_BK_BIN=$DIT_BAK/bk_bin
-            if ! hit_option '-o'; then
+            if ! hit_option '-o' && [[ -n $hm_platform ]]; then
                 local bin_extfw=out/watch@$hm_platform/binary/extfw
                 if hit_option '--firmware-ota'; then
                     input=yes
@@ -2211,7 +2239,7 @@ function dit-make {
             fi
             make clean
             make distclean
-            if ! hit_option '-o' && [[ -d $DIT_BK_BIN ]]; then
+            if ! hit_option '-o' && [[ -d $DIT_BK_BIN ]] && [[ -n $hm_platform ]]; then
                 local binary_res=$DIT_BK_BIN/out/watch@$hm_platform/binary
                 local sensor_binary_res=$DIT_BK_BIN/out_hub/sensorhub@$hm_platform/binary
                 (
@@ -2245,6 +2273,7 @@ function dit-make {
             make $config_select BUILD_TYPE=$debug_release BUILD_FW_VER=$version
             cd - >/dev/null
             echo $config_select": "$version >$OTA_VERSION
+            hm_platform=$(grep HMI_BUILD_BOARD build/.config |awk -F "=" '{print $2}' |tr -d ' "')
         fi
         head -n 1 $OTA_VERSION > ota_version.tmp
         truncate -s 0 $OTA_VERSION
@@ -2917,7 +2946,7 @@ fix | - >
                     ;;
                 S)
                     [[ -z $commit_type ]] && {
-                        echo_c -p "(press F to find, press Enter and empty as new commit)"
+                        echo_c -p "(press F to find, press 0 as latest commit, press Enter and empty as new commit)"
                         read -p "Enter the commit ID to be pushed: " commit_id
                         [[ -z $commit_id ]] && commit_type='NEW' && bt=$input && input=I && continue
                     }
@@ -2965,7 +2994,7 @@ fix | - >
                                 [[ $enter = 'yes' ]] && break
                             done
                         }
-                        [[ $commit_type = 'NEW' ]] && git add -u
+                        [[ $commit_type = 'NEW' ]] && git add -u && git status -s
 help_single_push="
 ------------------------------------------------------------------------
   A: 添加要提交的文件
@@ -4852,6 +4881,7 @@ commit_count_from_gerrit() {
 env_cfg() {
     if hit_option '--repo'; then
         curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+        chmod a+x ~/bin/repo
     fi
 }
 function dit-tools {
@@ -5169,6 +5199,7 @@ function dit-git {
 UPDATE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/doit"
 VERSION_URL="https://raw.githubusercontent.com/skullboyer/doit/main/version"
 UPGRADE_URL="https://raw.githubusercontent.com/skullboyer/doit/main/upgrade"
+CHANGELOG_URL="https://raw.githubusercontent.com/skullboyer/doit/main/changelog"
 function dit-update {
     current_version=$(sed -n '2p' $DIT_EXE |awk -F 'ver:' '{print $2}')
     if [[ $do_cmd == 'update' ]] && hit_option '-g'; then
@@ -5176,6 +5207,13 @@ function dit-update {
         echo $current_version >./release/version
         echo "no care" >./release/upgrade
         [[ ${EXEC_PARAMS[@]} =~ '--force' ]] && echo "force" >./release/upgrade
+        echo "更新日志($current_version)：" >./release/changelog.tmp
+        echo -e "\n> changelog (press Ctrl+D to finish):"
+        tmp_changelog=$(cat)
+        [[ -n $tmp_changelog ]] && {
+            echo "$tmp_changelog" >>./release/changelog.tmp
+            mv ./release/changelog.tmp ./release/changelog
+        }
         return 0
     fi
     [ $1 = '-b' ] && {
@@ -5200,6 +5238,10 @@ function dit-update {
     [ $last_cmd = '?' ] && echo "now: "$current_version
     compare_version $new_version $current_version
     if [[ $? -eq 1 ]]; then
+        changelog=$(curl -s "$CHANGELOG_URL")
+        changelog_ver=$(echo "$changelog" |head -n 1 |awk -F '[()]' '{print $2}')
+        compare_version $changelog_ver $current_version
+        [[ $? -eq 1 ]] && echo "$changelog"
         read -p "New version available: updated? [Y/n]: " input
         [[ $input != 'Y' ]] && return 1
         echo "Updating..."
