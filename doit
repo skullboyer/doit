@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Fri Jul 10 20:17:04 CST 2026 by skull  ver:26.7.10.20.17
+#@create:Thu Sep  3 13:53:08 CST 2026 by skull  ver:26.9.3.1353
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -27,18 +27,18 @@ error_handler() {
     exit $exit_code
 }
 
-exit_handler() {
+interrupt_exit_handler() {
     local exit_code=$?
-    stop_spin_bar
-    stop_spin "exit."
+    echo "interrupt."
     exit $exit_code
 }
 
-interrupt_exit_handler() {
+exit_handler() {
     local exit_code=$?
     stop_spin_bar
+    over_make
+    cleanup_after_script_exit
     stop_spin "exit."
-    terminal_make
     exit $exit_code
 }
 
@@ -65,7 +65,10 @@ $script_name init [-b] [-x] [-j]
     -j  jobs            指定要处理任务的线程数
 
 同步代码仓库
-$script_name sync [--depth] [--repo] [--rebase] [--time] [--jobs]
+$script_name sync [-C] [--depth] [--repo] [--rebase] [--time] [--jobs]
+    -C                  更新指定的代码仓
+        {repo-path}         代码仓
+        {number}            回滚深度
     --depth             同步代码前净化代码仓(包括删除未跟踪内容)，不带--repo选项则同步所有仓
         {number}            回滚深度
     --repo              更新的代码仓范围
@@ -152,7 +155,7 @@ $script_name diff [-p] [-v] [-i] [-a] [-c] [-x] [--suffix] [--exclude] [--path] 
                         检查指定文件类型变化的代码仓，格式：-c --suffix +type1 +type2 ...
     -x  untracked       检查仓内变化，包括未跟踪的文件，可使用格式：-x --suffix +type1 +type2 ... 来排除仅特定格式文件变化的仓以缩减有效范围，缺省则排除文件格式为'.gapp'
     --suffix            加入查看的文件类型，格式：--suffix +type1 +type2 ...
-    --exclude           排除要查看的文件，格式：--exclude -file1 -file2 ...
+    --exclude           排除要查看的文件或格式，格式：--exclude file1 file2 *.suffix ...
     --path              检查指定目录关键字的代码仓文件修改情况，格式：-i/-a[-v] --path +sport +config
     --backup            备份文件$REPO_DIFF
     --xml               检查manifest仓
@@ -288,6 +291,7 @@ $script_name tools [map] [crc] [display] [owner] [commit] [env]
             [csv]               excel格式，便于筛选
             [table]             表格，markdown格式，便于粘贴至文档
             [html]              网页格式，便于浏览、跳转
+        --jobs              Gerrit 并发查询数，缺省为8，建议范围1~16
         -v                  同时在终端输出相关信息
         tips:               缺省则在原文副本添加owner
     commit              查询提交数量
@@ -370,8 +374,10 @@ EXEC_OPTIONS=("${@:2}")
 
 current_path=`pwd`
 BUILD_TYPE=release
-version=`date +"%y.%-m.%-d.%-H.%M"`
+
+version=`date +"%y.%-m.%-d.%-H%M"`
 debug_release=debug
+
 enum_config=(
 mhs003s_atlas_defconfig
 mhs003s_munich_defconfig
@@ -411,6 +417,8 @@ CFG_IN_DIR="/etc/dit"
 [ -f $CFG_IN_DIR/gerrit ] && GERRIT_HOST=$(cat $CFG_IN_DIR/gerrit)
 [ -f $CFG_IN_DIR/user ] && GERRIT_USER=$(cat $CFG_IN_DIR/user)
 DIT_BAK=$DOT_DIT/bak
+DIT_BK_BIN=$DIT_BAK/bk_bin
+DIT_BK_LOCALE=$DIT_BAK/bk_res_locale
 DIT_TMP=$DOT_DIT/tmp
 CODE_INFO=$DOT_DIT/"code.info"
 OTA_VERSION=$DOT_DIT/"ota.version"
@@ -438,6 +446,7 @@ DECONFIG_ORIGIN_VER=$DOT_DIT/"origin.version"
 DECONFIG_PATH=$DOT_DIT"/deconfig.path"
 LOG_FILE=$DOT_DIT"/dit.log"
 TERMINAL_FILE=$DOT_DIT"/terminal.log"
+MAKE_WARNING=$DOT_DIT"/make_warning.txt"
 flash_dir=/mnt/d/work/tools/02_download/pcfire
 ota_dir=/mnt/d/ota
 read_dir=/mnt/d/work/code
@@ -487,7 +496,14 @@ logF() {
         *)
             log_tag="$1"
             log_tag="${log_tag#tag=}"
-            [ -z $log_tag ] && log_msg="$1"
+            if [ -z $log_tag ]; then
+                log_msg="$1"
+                echo -e "$log_msg" >>$LOG_FILE
+            else
+                log_msg="$2"
+                echo -e "${log_tag:0:16} $log_msg" >>$LOG_FILE
+            fi
+            return
             ;;
     esac
     [ $log_ctrl -eq 0 ] && echo -e "$log_level> $(date '+%Y.%m.%d %H:%M:%S.%3N') ${log_tag:0:16} $log_msg" >>$LOG_FILE
@@ -551,7 +567,6 @@ echo_c() {
     [[ -n "$fg_color" ]] && color_code="\033[1;${fg_color}m"  
     [[ -n "$bg_color" ]] && color_code="${color_code}\033[${bg_color}m" 
     echo -e "${color_code}${text}\033[0m"
-    logF -I tag="echo_c" "${text}"
 }
 test_echo_c() {
     echo "========== 基础前景色测试 =========="
@@ -685,30 +700,36 @@ escape_for_grep() {
     printf '%s' "$escaped"
 }
 log() {
-    echo -e "$(date '+%H:%M:%S.%3N') $@"
+    echo -e "$@"
+    logF "$@"
 }
 log_i() {
-    echo -e "I> $(date '+%H:%M:%S.%3N') $@"
+    local caller_lineno="${BASH_LINENO[0]}"
+    echo -e "I> $(date '+%H:%M:%S.%3N') at:$caller_lineno $@"
+    logF -I tag="log_i" "at:$caller_lineno $@"
 }
 log_w() {
-    echo_c -y "W> $(date '+%H:%M:%S.%3N') $@"
+    local caller_lineno="${BASH_LINENO[0]}"
+    echo_c -y "W> $(date '+%H:%M:%S.%3N') at:$caller_lineno $@" >&2
+    logF -W tag="log_w" "at:$caller_lineno $@"
 }
 log_e() {
-    echo_c -r "E> $(date '+%H:%M:%S.%3N') $@"
+    local caller_lineno="${BASH_LINENO[0]}"
+    echo_c -r "E> $(date '+%H:%M:%S.%3N') at:$caller_lineno $@" >&2
+    logF -E tag="log_e" "at:$caller_lineno $@"
 }
 log_assert() {
     [ $1 -ne 0 ] && {
         shift
-        log_e "$@" "at line:${BASH_LINENO[0]}"
+        local caller_lineno="${BASH_LINENO[0]}"
+        log_e "at:$caller_lineno $@"
     }
 }
 diagnose_cmd() {
     if ! output=$(eval "$@" 2>&1); then
-        local caller_lineno="${BASH_LINENO[0]}"
-        echo "Error occurred on line $caller_lineno, command: $@" >&2
-        logF -E tag="Diagnosis" "Error occurred on line $caller_lineno, command: $@"
-        echo "Error details: $output" >&2
-        logF -E tag="Diagnosis" "Error details: $output"
+        log_e "Error occurred, cmd: $@"
+        log_e "Error details: $output"
+        return 1
     fi
 }
 pulse_diagnosis() {
@@ -718,6 +739,12 @@ pulse_diagnosis() {
         shift 2
         log_w "$@" "at line:${BASH_LINENO[0]}"
     }
+}
+is_number() {
+    [[ "$1" =~ ^[+-]?([0-9]+\.?[0-9]*|[0-9]*\.[0-9]+)([eE][+-]?[0-9]+)?$ ]]
+}
+is_digits() {
+    [[ "$1" =~ ^[0-9]+$ ]]
 }
 check_last_cmd() {
     local ret=$?                               
@@ -736,7 +763,7 @@ contains_element() {
     [[ $last_cmd = '?' ]] && echo "match  $match"
     for element; do
         [[ $last_cmd = '?' ]] && echo "element $element  ${match%%=*}"
-        if is_number "$match"; then
+        if is_digits "$match"; then
             return 0
         fi
         [[ "${match%%=*}" == "${element%%=*}" ]] && return 0
@@ -997,8 +1024,15 @@ spin() {
     rm -f "$spin_percent_file"
     while sleep $delay; do
         if [[ -f $spin_percent_file ]]; then
-            local percent=$(< $spin_percent_file)
-            printf '\r%s    [%d%%]' "${spinChars:i++%totalChars:1}" "${percent:-0}" >&3
+            local progress_value=$(< "$spin_percent_file")
+            if [[ $progress_value = count:* ]]; then
+                local counted=${progress_value#count:}
+                printf '\r%s    [已统计 %d 条]\033[K' \
+                    "${spinChars:i++%totalChars:1}" "${counted:-0}" >&3
+            else
+                printf '\r%s    [%d%%]\033[K' \
+                    "${spinChars:i++%totalChars:1}" "${progress_value:-0}" >&3
+            fi
         else
             printf '%s\r' "${spinChars:i++%totalChars:1}" >&3 
         fi
@@ -1010,8 +1044,7 @@ start_spin() {
     pid=$! 
 }
 stop_spin() {
-    [ $pid -eq 0 ] && return
-    kill $pid > /dev/null 2>&1
+    [ $pid -ne 0 ] && kill $pid > /dev/null 2>&1
     echo "$@"
 }
 compare_version() {
@@ -1030,14 +1063,6 @@ compare_version() {
         fi
     done
     return 0 
-}
-is_number() {
-    local input=$1
-    if [[ $input =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
-        return 0 
-    else
-        return 1 
-    fi
 }
 convert_iso8601_time() {
     local input="$1"
@@ -1276,16 +1301,16 @@ test_get_option() {
     echo "\$?: "$?
     [[ ${OPTION_VALUE[@]} =~ 'boyer' ]] && echo "OPTION_VALUE: "${OPTION_VALUE[@]}
 }
-terminal_make() {
-    echo_c -y "Restore configuration in $(pwd)"
-    [[ -f $DECONFIG_PATH ]] && {
-        origin_version=$(< $DECONFIG_ORIGIN_VER)
+cleanup_after_script_exit() {
+    [ -d "$DIT_TMP" ] && rm -rf "$DIT_TMP"
+}
+over_make() {
+    [ $do_cmd != "make" ] && return
+    [[ -f $DECONFIG_PATH ]] && ! hit_option '-d' && {
         config_path=$(< $DECONFIG_PATH)
-        sed -i '/BOARD_FIRMWARE_VERSION=/cBOARD_FIRMWARE_VERSION="'$origin_version'"' $current_path/$config_path
+        config_select=$(echo ${config_path##*/})
+        cp $DIT_TMP/$config_select $current_path/$config_path
     }
-    fw_ver_mk=$current_path/build/"build_rules/fw_version.mk"
-    fw_ver_mk_bk=$DIT_TMP/fw_version.mk
-    [[ -f $fw_ver_mk_bk ]] && mv $fw_ver_mk_bk $fw_ver_mk
     [[ -f $DIT_TMP/board_bsd.file ]] && board_bsd_file=$(< $DIT_TMP/board_bsd.file)
     [[ -f $DIT_TMP/board_bsd.c ]] && cp $DIT_TMP/board_bsd.c $current_path/$board_bsd_file
 }
@@ -1334,11 +1359,11 @@ simple_select_config() {
         echo "q: exit"
         read -p "Please select product: " select
         [ $select = "q" ] && exit 0
-        [[ $select =~ ^[0-9]+$ ]] && {
+        if is_digits $select; then
             config_select=${temp_config[$select]}
-        } || {
+        else
             keyword=$select
-        }
+        fi
         [[ $config_select =~ "_defconfig" ]] && echo "config_select: "$config_select && break
     done
 }
@@ -1352,7 +1377,7 @@ reduced_product_config() {
     read -p "Please select product or input keyword: " select
     [[ $select = "--find" ]] && simple_select_config && return
     [[ $select = "q" || $select = "Q" ]] && exit 1
-    [[ $select =~ ^[0-9]+$ ]] && config_select=${enum_config[$select]} && return
+    is_digits $select && config_select=${enum_config[$select]} && return
     generate_product_menu
     if [[ ${enum_config[@]} =~ $select ]]; then
         local index=0
@@ -1394,11 +1419,11 @@ select_config() {
             continue
         }
         directory_history[$((++index))]=$config_select
-        [[ $select =~ ^[0-9]+$ ]] && {
+        if is_digits $select; then
             config_select=${temp_config[$select]}
-        } || {
+        else
             keyword=$select
-        }
+        fi
         [[ $config_select =~ "_defconfig" ]] && break
     done
 }
@@ -1510,7 +1535,7 @@ copy_firmware() {
             do
                 read -p "Please select: " select
                 [[ $select = "q" || $select = "Q" ]] && exit 1
-                [[ $select =~ ^[0-9]+$ ]] || { echo "Enter a number"; continue; }
+                is_digits $select || { echo "Enter a number"; continue; }
                 if ((0 <= select && select < ${#enum_product_name[@]})); then
                     last_cmd=${enum_product_name[$select]}
                     break
@@ -1849,8 +1874,10 @@ test_version() {
     fi
 }
 test_instance() {
+    test_instance $@
     shift
     test_read_c
+    test_version $@
     test_echo_c
 }
 function dit-clean {
@@ -1949,6 +1976,9 @@ function code_assign_node {
     (repo sync >/dev/null 2>&1 && echo "" && prompt_tone 0) &
     return 0
 }
+cleanup_after_switch_repo() {
+    [[ -d $DIT_BK_BIN ]] && rm -rf $DIT_BK_BIN
+}
 function dit-xml {
     option_check $arg2
     case $arg2 in
@@ -1977,7 +2007,8 @@ function dit-xml {
                 echo -e "\a!!! Please enter the product name."
                 return -1
             }
-            [[ $last_cmd =~ ^[0-9]+$ ]] && git_fallback $last_cmd
+            cleanup_after_switch_repo
+            is_digits $last_cmd && git_fallback $last_cmd
             echo "XML Switching..."
             [[ $manifest_branch ]] && {
                 rm -rf .repo
@@ -2041,6 +2072,15 @@ function dit-xml {
 }
 function dit-sync {
     option_check $arg2
+    hit_option '-C' && {
+        local depth=$arg4
+        is_digits $depth || depth=0
+        local repo_path=$arg3
+        local branch=$(grep branch $CODE_INFO |cut -d " " -f2)
+        git -C $repo_path reset --hard HEAD~$depth
+        git -C $repo_path pull origin $branch
+        return
+    }
     [ -f $CP_HISTORY_LOG ] && rm $CP_HISTORY_LOG
     [ -f $COMMIT_LOG ] && rm $COMMIT_LOG
     if hit_option '--time'; then
@@ -2064,7 +2104,7 @@ function dit-sync {
     if hit_option '--depth'; then
         get_option_index_and_value --depth
         local depth=$OPTION_VALUE
-        [[ ! $depth =~ ^[0-9]+$ ]] && depth=0
+        is_digits $depth || depth=0
         if ! hit_option '--repo'; then
             git_fallback $depth
             return
@@ -2094,7 +2134,6 @@ function dit-sync {
                 echo_c -b "  $module"
                 git -C $module reset --hard HEAD~$depth
                 git -C $module pull origin $branch
-                echo
             done
             return
         }
@@ -2199,7 +2238,6 @@ function dit-make {
             else
                 board_bsd=platform/board/$hm_platform/board_bsd.c
             fi
-            [ -d "$DIT_TMP" ] || mkdir -p "$DIT_TMP"
             cp $board_bsd $DIT_TMP
             board_bsd_file=$DIT_TMP/board_bsd.file
             echo $board_bsd >$board_bsd_file
@@ -2212,20 +2250,17 @@ function dit-make {
             update_watch_product_list $config_select
             backup_firmware $config_select
             cd build
-            DIT_BK_BIN=$DIT_BAK/bk_bin
-            if ! hit_option '-o' && [[ -n $hm_platform ]]; then
-                local bin_extfw=out/watch@$hm_platform/binary/extfw
+            local bin_extfw=out/watch@$hm_platform/binary/extfw
+            if ! hit_option '-o' && [[ -n $hm_platform ]] && [[ -d $bin_extfw ]]; then
                 if hit_option '--firmware-ota'; then
                     input=yes
-                elif [[ -d $bin_extfw ]]; then
+                else
                     unset input
                     read_c -y "Do you want to back up OTA-BIN? [yes]: " input
                 fi
-                [[ -f $DIT_BK_BIN ]] && {
-                    ver_number=$(head -1 $DIT_BK_BIN/ota.version |cut -d: -f2 |xargs)
-                    new_ver_number=$(head -1 $OTA_VERSION |cut -d: -f2 |xargs)
-                }
-                [[ $input = yes ]] && [[ -d $bin_extfw ]] && [[ $ver_number != $new_ver_number ]] && {
+                [[ -f $DIT_BK_BIN/ota.version ]] && ver_number=$(head -1 $DIT_BK_BIN/ota.version |cut -d: -f2 |xargs)
+                [[ -f $OTA_VERSION ]] && new_ver_number=$(head -1 $OTA_VERSION |cut -d: -f2 |xargs)
+                [[ $input = yes ]] && [[ $ver_number != $new_ver_number ]] && {
                     echo "backup ota-bin start"
                     start_spin_bar
                     rm -rf $DIT_BK_BIN
@@ -2239,7 +2274,7 @@ function dit-make {
             fi
             make clean
             make distclean
-            if ! hit_option '-o' && [[ -d $DIT_BK_BIN ]] && [[ -n $hm_platform ]]; then
+            if hit_option '--firmware-ota' && [[ -d $DIT_BK_BIN ]] && [[ -n $hm_platform ]]; then
                 local binary_res=$DIT_BK_BIN/out/watch@$hm_platform/binary
                 local sensor_binary_res=$DIT_BK_BIN/out_hub/sensorhub@$hm_platform/binary
                 (
@@ -2264,8 +2299,7 @@ function dit-make {
                 fi
             }
             deconfig=`find ../ -iname $config_select`
-            local temp=$(mktemp)
-            cp $deconfig $temp
+            cp $deconfig $DIT_TMP
             echo ${deconfig#*/} >$DECONFIG_PATH
             grep BOARD_FIRMWARE_VERSION $deconfig |cut -d '=' -f2 |tr -d '"' >$DECONFIG_ORIGIN_VER
             local deconfig_version=$(grep BOARD_FIRMWARE_VERSION $deconfig)
@@ -2288,7 +2322,7 @@ function dit-make {
             echo "other core: build ${hm_platform}" >>$OTA_VERSION
             [ -d out_hub ] && rm -rf out_hub
             if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
-                make BUILD_DIR=out_hub APPDIR=out_hub; then
+                make BUILD_DIR=out_hub APPDIR=out_hub BUILD_TYPE=$debug_release BUILD_FW_VER=$version; then
                 sensorhub_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin
                 sensorhub_sign_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin
                 extfw_path=out/watch@$hm_platform/binary/extfw
@@ -2304,12 +2338,6 @@ function dit-make {
                 return -2
             fi
         fi
-        fw_ver_mk="build_rules/fw_version.mk"
-        fw_ver_mk_bk=$DIT_TMP/fw_version.mk
-        [[ -f $fw_ver_mk ]] && {
-            cp $fw_ver_mk $fw_ver_mk_bk
-            sed -i '/^\$(error BUILD_FW_VER must be a.b.c.d when FW_VER_STRATEGY=legacy/d' $fw_ver_mk
-        }
         if hit_option '-o'; then
             echo_c -g "Make OTA"
             make ota -j16
@@ -2318,24 +2346,29 @@ function dit-make {
             make -j16
         fi
         local make_result=$?
-        [[ -f $fw_ver_mk_bk ]] && mv $fw_ver_mk_bk $fw_ver_mk
-        if hit_option '-d'; then
-            [[ -f $DIT_TMP/board_bsd.file ]] && board_bsd_file=$(< $DIT_TMP/board_bsd.file)
-            [[ -f $DIT_TMP/board_bsd.c ]] && cp $DIT_TMP/board_bsd.c ../$board_bsd_file
-        else
-            mv $temp $deconfig
-        fi
+        [ -f $TERMINAL_FILE ] && {
+            grep "warning:" $TERMINAL_FILE >$MAKE_WARNING
+            warning_lines=9
+            head -n $warning_lines $MAKE_WARNING
+            [[ $(wc -l < $MAKE_WARNING) -gt $warning_lines ]] && {
+                echo "..."
+                echo_c -y "See $MAKE_WARNING for all build wanings!"
+            }
+        }
         [ $make_result != 0 ] && echo "!!make terminal" && rm -rf sign.pem && return -1
     }
-    DIT_BK_LOCALE=$DIT_BAK/bk_res_locale
     if hit_option '-o'; then
         [ -d $DIT_BK_LOCALE ] && rm -rf $DIT_BK_LOCALE
-        hit_option '--ota' && {
-            [[ -z $hm_platform ]] && echo_c -r "HMI_BUILD_BOARD not found in build/.config" && return 2
+        if [[ -n $hm_platform ]]; then
             res_locale=build/out/watch@$hm_platform/binary/ota/resources/locale/locale.zip
-            [ ! -f $res_locale ] && echo_c -r "resources locale.zip is not exist" && return 3
-            mkdir $DIT_BK_LOCALE && cp $res_locale $DIT_BK_LOCALE
-        }
+            if [[ -f $res_locale ]]; then
+                mkdir $DIT_BK_LOCALE && cp $res_locale $DIT_BK_LOCALE
+            else
+                echo_c -w "resources locale.zip is not exist"
+            fi
+        else
+            echo_c -w "HMI_BUILD_BOARD not found in build/.config"
+        fi
     else
         hit_option '--firmware-ota' && {
             [[ `pwd` =~ 'build' ]] || cd build
@@ -2551,7 +2584,7 @@ function dit-diff {
             echo -e "\nproject ${repo_path[$index]}" >>$REPO_DIFF
             git -C ${repo_path[$index]} show --stat |tee -a $REPO_DIFF
         done
-        echo -e "\n\n"$split_line >> $REPO_DIFF
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         for ((index=0; index<${#repo_path[@]}; index++))
         do
             git -C ${repo_path[$index]} diff HEAD >>$REPO_DIFF
@@ -2561,7 +2594,7 @@ function dit-diff {
     type_filter='\.c$|\.cc$|\.cpp$|\.h$'
     type_filter_group=('*.c' '*.cc' '*.cpp' '*.h')
     file_exclude=('generated_sku.h')
-    file_exclude_diff=(':!*generated_sku.h')
+    file_exclude_diff=("':!*generated_sku.h'")
     [[ ${EXEC_PARAMS[@]} =~ '--path' ]] && {
         arg_position=0
         for arg in "$@"
@@ -2621,15 +2654,16 @@ function dit-diff {
         done
         for arg in "${@:$arg_position}"
         do
-            if [[ $arg =~ ^-[^-].* ]]
-            then
-                file_type=${arg:1}
-                file_exclude+=" -e $file_type"
-                file_exclude_diff+=(" :!*$file_type")
-            else
-                break
-            fi
+            [[ $arg == --* || $arg == ? ]] && break
+            file_exclude+=" -e $arg"
+            file_exclude_diff+=(" ':!$arg'")
         done
+    }
+    [ $last_cmd = '?' ] && {
+        echo -e "type_filter "$type_filter
+        echo -e "file_exclude "$file_exclude
+        echo -e "type_filter_group "${type_filter_group[*]}
+        echo -e "file_exclude_diff "${file_exclude_diff[*]}
     }
     [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && {
         echo "project .repo/manifests/" >>$REPO_DIFF
@@ -2638,7 +2672,7 @@ function dit-diff {
     [[ ! $path_keyword ]] && path_keyword=.
     if [[ $arg2 = '-i' ]]; then
         repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a $REPO_DIFF
-        echo -e "\n\n"$split_line >> $REPO_DIFF
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>$REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-a' ]]; then
@@ -2651,11 +2685,11 @@ function dit-diff {
                 fi
             fi
         ' |tee -a $REPO_DIFF
-        echo -e "\n\n"$split_line >> $REPO_DIFF
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         repo forall -p -c '
             if pwd |grep -iq "'"$path_keyword"'"; then
                 changed=$(git status -s |grep -v -e '"$file_exclude"')
-                i[ -n "$changed" ] && git diff
+                [ -n "$changed" ] && git diff
             fi
         ' >>$REPO_DIFF
         unset file_exclude
@@ -2675,39 +2709,38 @@ function dit-diff {
             type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
             repo forall -p -c 'if git status --porcelain |grep -E "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
         fi
-        echo -e "\n\n"$split_line >> $REPO_DIFF
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         unset file_exclude
     elif [[ $arg2 = '-x' ]]; then
         type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
         [ -z $type_special ] && type_special="gapp"
         repo forall -p -c 'if git diff --name-only |grep -vE "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
-        echo -e "\n\n"$split_line >> $REPO_DIFF
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         unset file_exclude
     fi
     [ ${#file_exclude[@]} -ne 0 ] && {
         [[ ${EXEC_PARAMS[@]} =~ '--path' ]] && {
             repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff --stat; fi' |tee -a $REPO_DIFF
-            echo -e "\n\n"$split_line >> $REPO_DIFF
+            echo -e "\n"$split_line"\n" >> $REPO_DIFF
             repo forall -p -c 'if pwd |grep -i '"$path_keyword"' >/dev/null; then git diff; fi' >>$REPO_DIFF
             return 0
         }
         [ $last_cmd = '?' ] && echo -e "\n* exclude file: $(declare -p file_exclude)\n"
         repo forall -p -c '
             changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-            [ -n "$changed" ] && echo "$changed"
+            [ -n "$changed" ] && echo "$changed" && git diff --shortstat
         ' |tee -a $REPO_DIFF
-        echo -e "\n\n"$split_line >> $REPO_DIFF
-        [ $last_cmd = '?' ] && echo -e "\n> git diff -- "${type_filter_group[*]} ${file_exclude_diff[*]}
+        echo -e "\n"$split_line"\n" >> $REPO_DIFF
         if [[ $arg2 = '-v' ]]; then
             repo forall -p -c '
                 changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-                [ -n "$changed" ] && echo "$changed"
+                [ -n "$changed" ] && git diff -- '"${file_exclude_diff[*]}"'
             ' |tee -a $REPO_DIFF
         else
-            repo forall -p -c '
-                changed=$(git status -s |grep -E "'"$type_filter"'" |grep -v -e '"$file_exclude"')
-                [ -n "$changed" ] && git diff
-            ' >>$REPO_DIFF
+            repo forall -p -c "
+                changed=\$(git status -s |grep -E '$type_filter' |grep -v -e $file_exclude)
+                [ -n \"\$changed\" ] && git diff -- ${file_exclude_diff[*]}
+            " >>$REPO_DIFF
         fi
     }
     [[ ${EXEC_PARAMS[@]} =~ '--xml' ]] && git -C .repo/manifests diff >>$REPO_DIFF
@@ -2798,7 +2831,7 @@ prompt="
                     }
                     local temp_message=""
                     local result=$(git branch -a| grep "remotes/origin/$branch")
-                    [ -z "$result" ] && unset input && unset branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
+                    [ -z "$result" ] && unset input bt branch && echo -e "\e[33m!!branch is invalid\e[0m" && continue
                     [[ ! $message ]] && {
                         echo_c purple "* Press 'Q' to return to the menu"
                         while :
@@ -2809,7 +2842,7 @@ prompt="
                             break
                         done
                     }
-                    [[ "$temp_message" = 'Q' ]] && unset input && continue
+                    [[ "$message" = 'Q' ]] && unset input bt && continue
                     git commit -m "$message"
                     [[ $input = 'M' ]] && git commit --amend
                     input="push" && continue
@@ -2880,7 +2913,7 @@ prompt="
                     echo_c purple "(If no modification is needed, press 'Enter'. To go back, input 'Q'.)"
                     read -p "> commit branch: " temp_branch
                     [[ $temp_branch == 'Q' || ( -z $temp_branch && -z $branch ) ]] && {
-                        unset input
+                        unset input bt
                         continue
                     }
                     [[ -n $temp_branch ]] && branch=$temp_branch
@@ -2908,11 +2941,11 @@ fix | - >
                             echo "temp_message"
                             ;;
                         *)
-                            echo -e "\n> commit message (press Ctrl+D to finish):"
+                            echo -e "\n> commit message (press Ctrl+D to finish. To go back, input 'Q'.):"
                             temp_message=$(cat)
                             ;;
                     esac
-                    [ "$temp_message" = 'Q' ] && unset input && continue
+                    [ "$temp_message" = 'Q' ] && unset input bt && continue
                     [ "$temp_message" ] && message=$temp_message
                     echo -e "\n"
                     echo "(Keep, press 'Enter'. Clean, press 'Space'.)"
@@ -2925,7 +2958,7 @@ fix | - >
                     while :
                     do
                         read -p "> log depth: " depth
-                        [[ $depth =~ ^[0-9]+$ ]] || { echo "!!Only accept digital"; continue; }
+                        is_digits $depth || { echo "!!Only accept digital"; continue; }
                         break
                     done
                     git log -$depth
@@ -2961,7 +2994,7 @@ fix | - >
                     else
                         [[ $commit_type = 'NEW' ]] && {
                             echo_c -y "There is no content to submit"
-                            unset input && continue
+                            unset input bt && continue
                         }
                     fi
                     git branch origin_single_push
@@ -3124,8 +3157,8 @@ prompt_single_push="
                                 echo "$number>: $branch"
                                 ((number++))
                             done
-                            read -p "Please select branch: " select
-                            if [[ $select =~ ^[0-9]+$ ]]; then
+                            read -p "Please select branch (or enter): " select
+                            if is_digits $select; then
                                 temp_branch=${branches[$select]}
                             else
                                 temp_branch="$select"
@@ -3142,8 +3175,23 @@ prompt_single_push="
                         while :
                         do
                             local temp_topic=$(echo "$ssh_info" |grep "topic:" |awk -F " " '{print $2}')
-                            echo "amend topic: "${temp_topic[0]}
-                            topic=${temp_topic[0]}
+                            local topic_num=$(echo "$temp_topic" |wc -l)
+                            [[ $topic_num -gt 1 ]] && {
+                                readarray -t topics < <(echo "$temp_topic")
+                                local number=0
+                                for topic in "${topics[@]}"; do
+                                    echo "$number>: $topic"
+                                    ((number++))
+                                done
+                                read -p "Please select topic (or enter): " select
+                                if is_digits $select; then
+                                    temp_topic=${topics[$select]}
+                                else
+                                    temp_topic="$select"
+                                fi
+                            }
+                            echo "amend topic: "$temp_topic
+                            topic=$temp_topic
                             [[ -n topic ]] && break
                         done
                     fi
@@ -3167,13 +3215,13 @@ prompt_single_push="
                                 else
                                     git reset
                                 fi
-                                unset input && continue
+                                unset input bt && continue
                             }
                             branch=$current_branch
                         }
                     }
                     tmp_file=$(mktemp)
-                    git push origin HEAD:refs/for/$branch%topic=$topic 2>&1 |tee -a $tmp_file
+                    git push origin HEAD:refs/for/$branch%topic="$topic" 2>&1 |tee -a $tmp_file
                     status=${PIPESTATUS[0]}
                     if [[ $status -ne 0 ]]; then
                         echo_c -y "git push fail"
@@ -3186,7 +3234,7 @@ prompt_single_push="
                             git branch -D single_push origin_single_push
                             [[ $repo_state -ne 0 ]] && git stash pop
                         fi
-                        unset input && continue
+                        unset input bt && continue
                     fi
                     if [[ $commit_amend_tag = 'yes' ]]; then
                         echo -e "- Amend Commit" >>$temp_commit_log
@@ -3208,7 +3256,7 @@ prompt_single_push="
                         elif [[ $repo_state -eq 0 ]]; then
                             break
                         fi
-                        unset input && continue
+                        unset input bt && continue
                     }
                     break
                     ;;
@@ -3348,7 +3396,7 @@ function dit-stash {
         repo forall -p -c "git stash list |grep "$comment""
         echo -e "\n"
         read -p "\$ Confirm stash apply above? [Y/N]: " anser
-        echo -e "\n\n"$split_line >>$REPO_STASH
+        echo -e "\n"$split_line"\n" >>$REPO_STASH
         [[ $anser && $anser = 'Y' ]] && {
             repo forall -p -c "git stash list |grep "$comment" |grep -o '{.*}' |sed -e 's/{//g' |sed -e 's/}//g' |xargs -I % git stash apply %" |tee -a $REPO_STASH
         }
@@ -3685,7 +3733,7 @@ function dit-cp {
                     done
                 fi
             done <$CP_CHECK
-            echo -e "\n\n"$split_line >>$CP_CHECK
+            echo -e "\n"$split_line"\n" >>$CP_CHECK
             for ((i=0; i<${#path_array[@]}; i++)); do
                 echo ${path_array[i]}
                 echo ${hash_array[i]}
@@ -3697,7 +3745,7 @@ function dit-cp {
         }
         [[ ${EXEC_PARAMS[@]} =~ 'push' ]] && {
             cat $CP_CHECK >$REPO_DIFF
-            echo -e "\n\n"$split_line >> $REPO_DIFF
+            echo -e "\n"$split_line"\n" >> $REPO_DIFF
         }
         return 0
     }
@@ -3727,7 +3775,7 @@ function dit-cp {
                 ((number++))
             done
             read -p "Please select branch: " select
-            [[ $select =~ ^[0-9]+$ ]] && branch=${branches[$select]}
+            is_digits $select && branch=${branches[$select]}
             read -p "Confirm commit branch: $branch  [Y/N/M]: " choice
             if [[ $choice = 'Y' ]] ; then
                 if ret=$(get_current_branch); then
@@ -3769,7 +3817,7 @@ function dit-cp {
                 ((number++))
             done
             read -p "Please select branch: " select
-            [[ $select =~ ^[0-9]+$ ]] && branch=${branches[$select]}
+            is_digits $select && branch=${branches[$select]}
             read -p "Confirm commit branch: $branch  [Y/N/M]: " choice
             if [[ $choice = 'Y' ]] ; then
                 if ret=$(get_current_branch); then
@@ -3905,7 +3953,7 @@ function dit-cp {
             ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$arg3 >$SSH_GET
             grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
                 ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set topic:"$arg3" >$SSH_GET
-                grep -w "project:" $SSH_GET >$PROCESS_RESULT && ssh_get_topic="$arg3" || {
+                grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
                     ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set hashtag:"$arg3" >$SSH_GET
                     grep -w "project:" $SSH_GET >$PROCESS_RESULT || {
                         echo "!!Invalid commit info" && exit -1
@@ -3950,6 +3998,7 @@ function dit-cp {
         readarray -t commit_refs <<<$commit_refs
         grep -w "subject:" $SSH_GET >.$script_name/cp_project_subject.tmp 
         readarray -t commit_subject < <(awk -F ":" '{print $2}' .$script_name/cp_project_subject.tmp)
+        ssh_get_topic=$(grep -w "topic:" $SSH_GET |awk -F ': ' '{print $2}' |uniq)
         echo "$"$do_cmd" "$arg2" "$arg3"  @"$(date) >$CP_LOG
         [[ -f $CP_CONFLICT ]] && rm -rf $CP_CONFLICT
         echo -e "@$(date)\ncherry-pick conflict repo-path\n\ntopic=$ssh_get_topic" >$CP_CONFLICT
@@ -4116,7 +4165,7 @@ function map {
         done
         while true; do
             read -p "请输入序号 (1-$count): " choice
-            if is_number "$choice" && [[ $choice -ge 1 ]] && [[ $choice -le $count ]]; then
+            if is_digits "$choice" && [[ $choice -ge 1 ]] && [[ $choice -le $count ]]; then
                 map_file="${files[$((choice-1))]}"
                 break
             else
@@ -4501,12 +4550,357 @@ function deduplicate_changelog_process {
     [ -f $temp_duplicate ] && rm $temp_duplicate
     return 0
 }
+function deduplicate_changelog_process_fast {
+    local changelog="$1"
+    local deduplicate_name="${2:-deduplicate.changelog}"
+    local duplicate_changelog="$CHANGELOG_OUT/duplicate.changelog"
+    local deduplicate_changelog="$CHANGELOG_OUT/$deduplicate_name"
+    local changelog_process="$CHANGELOG_OUT/process.log"
+    local changelog_check="$CHANGELOG_OUT/check.log"
+    mkdir -p "$CHANGELOG_OUT"
+    : >"$duplicate_changelog"
+    : >"$deduplicate_changelog"
+    : >"$changelog_process"
+    : >"$changelog_check"
+    awk \
+        -v dedup_out="$deduplicate_changelog" \
+        -v dup_out="$duplicate_changelog" \
+    '
+        function clear_repo(    i) {
+            for (i = 1; i <= count; i++) {
+                delete record[i]
+                delete keep[i]
+                delete status[i]
+                delete commit_hash[i]
+                delete reason[i]
+                delete description[i]
+                delete base_reason[i]
+                delete revert_depth[i]
+                delete effect[i]
+                delete identity[i]
+                delete next_unmatched[i]
+                delete duplicate_event[i]
+            }
+            split("", stack_top)
+            count = 0
+            duplicate_event_count = 0
+        }
+        function clean(value) {
+            gsub(/[[:space:]]+/, " ", value)
+            sub(/^ /, "", value)
+            sub(/ $/, "", value)
+            return value
+        }
+        function normalized_description(value) {
+            value = clean(value)
+            sub(/^"+/, "", value)
+            sub(/"$/, "", value)
+            return clean(value)
+        }
+        function clean_subject_word(word,    value) {
+            value = word
+            sub(/^"+/, "", value)
+            sub(/"+$/, "", value)
+            return value
+        }
+        function get_revert_word_depth(word,    value) {
+            value = clean_subject_word(word)
+            if (value == "Revert")
+                return 1
+            if (value !~ /^Revert\^[0-9]+$/)
+                return -1
+            sub(/^Revert\^/, "", value)
+            return value + 0
+        }
+        function mark_duplicate(record_index) {
+            if (!keep[record_index])
+                return
+            keep[record_index] = 0
+            duplicate_event[++duplicate_event_count] = record[record_index]
+        }
+        function process_repo(    i, j, fields, prefix, separator_index, payload,
+                                  field_count, field_index, word_depth, depth,
+                                  operation_effect, node_effect, stack_key, opposite_key) {
+            if (header == "")
+                return
+            for (i = 1; i <= count; i++) {
+                keep[i] = 1
+                separator_index = index(record[i], "|")
+                if (separator_index > 0)
+                    prefix = clean(substr(record[i], 1, separator_index - 1))
+                else
+                    prefix = clean(record[i])
+                field_count = split(prefix, fields, /[[:space:]]+/)
+                status[i] = fields[1]
+                commit_hash[i] = fields[2]
+                reason[i] = clean_subject_word(fields[3])
+                if (reason[i] == "Merge")
+                    continue
+                depth = 0
+                field_index = 3
+                while (field_index <= field_count) {
+                    word_depth = get_revert_word_depth(fields[field_index])
+                    if (word_depth < 0)
+                        break
+                    depth += word_depth
+                    field_index++
+                }
+                revert_depth[i] = depth
+                if (separator_index > 0) {
+                    description[i] = normalized_description(substr(record[i], separator_index + 1))
+                    if (depth > 0) {
+                        base_reason[i] = clean_subject_word(fields[field_index])
+                        if (base_reason[i] == "")
+                            base_reason[i] = "__untyped__"
+                    } else {
+                        base_reason[i] = reason[i]
+                    }
+                } else {
+                    payload = clean(record[i])
+                    sub(/^\[[+-]\][[:space:]]+[^[:space:]]+[[:space:]]+/, "", payload)
+                    if (depth > 0) {
+                        while (payload ~ /^"?Revert(\^[0-9]+)?[[:space:]]+/)
+                            sub(/^"?Revert(\^[0-9]+)?[[:space:]]+/, "", payload)
+                        base_reason[i] = "__untyped__"
+                    } else {
+                        base_reason[i] = "__untyped__"
+                    }
+                    description[i] = normalized_description(payload)
+                }
+                if (status[i] !~ /^\[[+-]\]$/ || commit_hash[i] == "" ||
+                    description[i] == "" || base_reason[i] == "")
+                    continue
+                operation_effect = (depth % 2 == 0 ? 1 : -1)
+                node_effect = (status[i] == "[+]" ? 1 : -1)
+                effect[i] = operation_effect * node_effect
+                identity[i] = base_reason[i] SUBSEP description[i]
+            }
+            for (i = count; i >= 1; i--) {
+                if (reason[i] == "Merge") {
+                    mark_duplicate(i)
+                    continue
+                }
+                if (identity[i] == "" || effect[i] == 0)
+                    continue
+                opposite_key = identity[i] SUBSEP (-effect[i])
+                j = stack_top[opposite_key]
+                if (j) {
+                    stack_top[opposite_key] = next_unmatched[j]
+                    mark_duplicate(j)
+                    mark_duplicate(i)
+                } else {
+                    stack_key = identity[i] SUBSEP effect[i]
+                    next_unmatched[i] = stack_top[stack_key]
+                    stack_top[stack_key] = i
+                }
+            }
+            print header > dedup_out
+            print raw_header > dup_out
+            for (i = 1; i <= count; i++) {
+                if (keep[i])
+                    print record[i] > dedup_out
+            }
+            for (i = duplicate_event_count; i >= 1; i--)
+                print duplicate_event[i] > dup_out
+            print "" > dedup_out
+            print "" > dup_out
+            clear_repo()
+        }
+        BEGIN { clear_repo() }
+        / changed from / {
+            process_repo()
+            raw_header = $0
+            header = clean($0)
+            next
+        }
+        header != "" && /\[[+-]\]/ {
+            record[++count] = $0
+            next
+        }
+        END {
+            process_repo()
+            close(dedup_out)
+            close(dup_out)
+        }
+    ' "$changelog" || return 1
+    echo 100 >"$spin_percent_file"
+    if [[ ${EXEC_PARAMS[@]} =~ 'check' ]]; then
+        local origin_count deduplicate_count duplicate_count
+        origin_count=$(grep -cE '\[[+-]\]' "$changelog")
+        deduplicate_count=$(grep -cE '\[[+-]\]' "$deduplicate_changelog")
+        duplicate_count=$(grep -cE '\[[+-]\]' "$duplicate_changelog")
+        {
+            echo "status    origin  deduplicate  duplicate"
+            echo "[√]       $origin_count       $deduplicate_count          $duplicate_count"
+            echo "## generate by $GERRIT_USER  @$(date)"
+        } >"$changelog_check"
+        [[ $origin_count -eq $((deduplicate_count + duplicate_count)) ]] || return 1
+    fi
+    return 0
+}
+trim_whitespace() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+owner_collect_commit_hashes() {
+    local changelog="$1"
+    local output_file="$2"
+    local selected_module="$3"
+    local selected_type="$4"
+    local unsorted_file="${output_file}.unsorted"
+    local line project_selected=1 commit_mark commit_hash commit_type module
+    : >"$unsorted_file"
+    while IFS= read -r line; do
+        if [[ "$line" == *" changed from "* ]]; then
+            project_selected=1
+            if [[ $selected_module == "sport" ]]; then
+                project_selected=0
+                for module in "${sport_modules[@]}"; do
+                    if [[ "$line" == *"$module"* ]]; then
+                        project_selected=1
+                        break
+                    fi
+                done
+            fi
+            continue
+        fi
+        [[ $project_selected -eq 0 ]] && continue
+        [[ "$line" =~ \[[+-]\] ]] || continue
+        read -r commit_mark commit_hash commit_type _ <<<"$line"
+        [[ -z $commit_hash ]] && continue
+        [[ -n $selected_type && $commit_type != "$selected_type" ]] && continue
+        printf '%s\n' "$commit_hash" >>"$unsorted_file"
+    done <"$changelog"
+    sort -u "$unsorted_file" >"$output_file"
+    rm -f "$unsorted_file"
+}
+owner_query_commit_to_cache() {
+    local commit_hash="$1"
+    local cache_file="$OWNER_QUERY_CACHE_DIR/$commit_hash"
+    local query_file="$OWNER_QUERY_STATUS_DIR/${commit_hash}.query.$BASHPID"
+    if [[ -s $cache_file && $cache_file -nt $OWNER_QUERY_CACHE_CUTOFF ]]; then
+        return 0
+    fi
+    if ssh -n \
+        -o ConnectTimeout=10 \
+        -o ControlMaster=auto \
+        -o ControlPersist=600 \
+        -o ControlPath="$OWNER_CONTROL_PATH" \
+        -p 29418 "$GERRIT_USER@$GERRIT_HOST" \
+        gerrit query --current-patch-set "commit:$commit_hash" >"$query_file" \
+        && grep -q '^rowCount:' "$query_file"; then
+        mv "$query_file" "$cache_file"
+        return 0
+    fi
+    rm -f "$query_file"
+    return 1
+}
+owner_prefetch_commit_queries() {
+    local changelog="$1"
+    local jobs="$2"
+    local selected_module="$3"
+    local selected_type="$4"
+    local hash_file="$OWNER_QUERY_STATUS_DIR/commit_hashes"
+    local missing_hash_file="$OWNER_QUERY_STATUS_DIR/missing_hashes"
+    local commit_count missing_count commit_hash
+    owner_collect_commit_hashes "$changelog" "$hash_file" "$selected_module" "$selected_type"
+    commit_count=$(wc -l <"$hash_file")
+    [[ $commit_count -eq 0 ]] && return 0
+    : >"$missing_hash_file"
+    while IFS= read -r commit_hash; do
+        if [[ ! -s $OWNER_QUERY_CACHE_DIR/$commit_hash || ! $OWNER_QUERY_CACHE_DIR/$commit_hash -nt $OWNER_QUERY_CACHE_CUTOFF ]]; then
+            printf '%s\n' "$commit_hash" >>"$missing_hash_file"
+        fi
+    done <"$hash_file"
+    missing_count=$(wc -l <"$missing_hash_file")
+    if [[ $missing_count -eq 0 ]]; then
+        echo -e "\nUsing Gerrit cache: $commit_count commits"
+        return 0
+    fi
+    echo -e "\nQuerying Gerrit: $missing_count/$commit_count commits, jobs=$jobs..."
+    ssh -n -f \
+        -o ConnectTimeout=10 \
+        -o ControlMaster=auto \
+        -o ControlPersist=600 \
+        -o ControlPath="$OWNER_CONTROL_PATH" \
+        -p 29418 "$GERRIT_USER@$GERRIT_HOST" gerrit version >/dev/null 2>&1 || true
+    export GERRIT_USER GERRIT_HOST OWNER_QUERY_CACHE_DIR OWNER_QUERY_STATUS_DIR
+    export OWNER_QUERY_CACHE_CUTOFF OWNER_CONTROL_PATH
+    export -f owner_query_commit_to_cache
+    tr '\n' '\0' <"$missing_hash_file" | xargs -0 -r -n 20 -P "$jobs" \
+        bash -c 'for commit_hash; do owner_query_commit_to_cache "$commit_hash"; done' _ || true
+}
+owner_build_query_metadata_index() {
+    local hash_file="$1"
+    local output_file="$2"
+    awk \
+        -v cache_dir="$OWNER_QUERY_CACHE_DIR" \
+    '
+        BEGIN { separator=sprintf("%c", 28) }
+        {
+            commit_hash=$1
+            query_file=cache_dir "/" commit_hash
+            row_count_lines=0
+            row_count=0
+            owner=""
+            url=""
+            jira_description=""
+            subject_first=""
+            in_owner=0
+            while ((getline line < query_file) > 0) {
+                if (line ~ /^rowCount:/) {
+                    split(line, fields, /[[:space:]]+/)
+                    row_count_lines++
+                    row_count=fields[2] + 0
+                    continue
+                }
+                if (line ~ /^[[:space:]]*owner:/) {
+                    in_owner=1
+                    continue
+                }
+                if (in_owner && owner == "" && line ~ /^[[:space:]]*name:/) {
+                    value=line
+                    sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+                    owner=" " value
+                    in_owner=0
+                    continue
+                }
+                if (url == "" && line ~ /^[[:space:]]*url:/) {
+                    url=line
+                    sub(/^[[:space:]]*url:[[:space:]]*/, "", url)
+                    continue
+                }
+                if (jira_description == "" && line ~ /^[[:space:]]*subject:/) {
+                    subject=line
+                    sub(/^[[:space:]]*subject:[[:space:]]*/, "", subject)
+                    part_count=split(subject, parts, "|")
+                    jira_description=(part_count > 1 ? parts[2] : "")
+                    split(subject, words, /[[:space:]]+/)
+                    subject_first=words[1]
+                }
+            }
+            close(query_file)
+            if (row_count_lines > 0) {
+                print commit_hash separator row_count_lines separator row_count separator owner separator url separator jira_description separator subject_first
+            }
+        }
+    ' "$hash_file" >"$output_file"
+}
+owner_close_control_connection() {
+    ssh -n \
+        -o ControlPath="$OWNER_CONTROL_PATH" \
+        -p 29418 "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+}
 module_hit_table=("sport")
 function changelog_find_owner {
     local counter=1
     local sub_counter=1
     local module_hit=""
     local assign_name=""
+    local filter_type=""
+    local owner_jobs="${DIT_OWNER_JOBS:-8}"
     local commit_hash_repeat="commit_hash_repeat.txt"
     local changelog_error="changelog.error"
     local changelog_out="_out.txt"
@@ -4523,7 +4917,7 @@ function changelog_find_owner {
     [[ ! -d $CHANGELOG_OUT ]] && mkdir $CHANGELOG_OUT
     [[ ${EXEC_PARAMS[@]} =~ '--deduplicate' ]] && {
         local deduplicate_changelog="deduplicate.changelog"
-        deduplicate_changelog_process $changelog $deduplicate_changelog
+        deduplicate_changelog_process_fast "$changelog" "$deduplicate_changelog"
         changelog=$CHANGELOG_OUT/$deduplicate_changelog
         [[ $last_cmd = 'only' ]] && return 0
         echo -e "\nDeduplicate changelog complete!"
@@ -4572,6 +4966,15 @@ function changelog_find_owner {
         get_option_index_and_value --type
         filter_type=$OPTION_VALUE
     }
+    [[ ${EXEC_PARAMS[@]} =~ '--jobs' ]] && {
+        get_option_index_and_value --jobs
+        owner_jobs=$OPTION_VALUE
+    }
+    if ! is_digits "$owner_jobs" || [[ $owner_jobs -lt 1 ]]; then
+        echo "!! --jobs must be a positive integer"
+        return 1
+    fi
+    [[ $owner_jobs -gt 32 ]] && owner_jobs=32
     changelog_out="${changelog_out}"
     [ -f $changelog_out ] && rm $changelog_out
     touch $changelog_out
@@ -4602,8 +5005,8 @@ function changelog_find_owner {
     elif [[ "$output_type" == "csv" ]]; then
         echo "Where,Index,Owner,Commit,Jira" >$changelog_out
     elif [[ "$output_type" == "html" ]]; then
-        echo -e "<style>\n  table {\n    border-collapse: collapse;\n    width: 100%;\n  }\n  th, td {\n    text-align: left;\n\
-    padding: 8px;\n    border: 1px solid #ddd;\n    white-space: nowrap;\n  }\n</style>\n" >$changelog_out
+        echo -e "<style>\n  table {\n    border-collapse: collapse;\n    width: 100%;\n    table-layout: fixed;\n  }\n  th, td {\n    text-align: left;\n\
+    padding: 8px;\n    border: 1px solid #ddd;\n    white-space: nowrap;\n    vertical-align: top;\n  }\n  /* Index：只容纳序号，压缩原来没有用途的大块空白。 */\n  th:nth-child(1) {\n    width: 6%;\n    text-align: center;\n  }\n  /* Owner：姓名保持单行，宽度比 Index 稍大。 */\n  th:nth-child(2) {\n    width: 10%;\n  }\n  /* Jira：单号或较长文本可以在单元格内换行。 */\n  th:nth-child(3), td:nth-child(3) {\n    width: 14%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Gerrit：使用主要空间显示提交描述，超长内容继续自动换行。 */\n  th:nth-child(4), td:nth-child(4) {\n    width: 40%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Where：为 40 位节点 hash 预留 30%，窄窗口下允许安全换行。 */\n  th:nth-child(5), td:nth-child(5) {\n    width: 30%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n</style>\n" >$changelog_out
         if [ -n "${filter_type:-}" ]; then
             echo -e "<div class="table-title">@$(date) by $GERRIT_USER    #处理类型：${filter_type}</div>" >>$changelog_out
         else
@@ -4611,6 +5014,27 @@ function changelog_find_owner {
         fi
         echo -e "<table>\n  <tr>\n    <th>Index</th>\n    <th>Owner</th>\n    <th>Jira</th>\n    <th>Gerrit</th>\n    <th>Where</th>\n  </tr>\n" >>$changelog_out
     fi
+    local OWNER_QUERY_CACHE_DIR="$CHANGELOG_OUT/query_cache"
+    local OWNER_QUERY_STATUS_DIR
+    OWNER_QUERY_STATUS_DIR=$(mktemp -d /tmp/dit-owner-query.XXXXXX)
+    local OWNER_QUERY_CACHE_CUTOFF="$OWNER_QUERY_STATUS_DIR/cache_cutoff"
+    local OWNER_CONTROL_PATH="/tmp/dit-owner-ssh-${BASHPID}"
+    mkdir -p "$OWNER_QUERY_CACHE_DIR"
+    touch -d '7 days ago' "$OWNER_QUERY_CACHE_CUTOFF"
+    owner_prefetch_commit_queries "$changelog" "$owner_jobs" "$module_hit" "$filter_type"
+    local owner_metadata_file="$OWNER_QUERY_STATUS_DIR/query_metadata"
+    owner_build_query_metadata_index "$OWNER_QUERY_STATUS_DIR/commit_hashes" "$owner_metadata_file"
+    local metadata_hash metadata_result_count metadata_link_count metadata_owner metadata_url metadata_jira metadata_subject_first
+    local -A owner_result_count_by_hash owner_link_count_by_hash owner_name_by_hash
+    local -A owner_url_by_hash owner_jira_by_hash owner_subject_first_by_hash
+    while IFS=$'\034' read -r metadata_hash metadata_result_count metadata_link_count metadata_owner metadata_url metadata_jira metadata_subject_first; do
+        owner_result_count_by_hash["$metadata_hash"]="$metadata_result_count"
+        owner_link_count_by_hash["$metadata_hash"]="$metadata_link_count"
+        owner_name_by_hash["$metadata_hash"]="$metadata_owner"
+        owner_url_by_hash["$metadata_hash"]="$metadata_url"
+        owner_jira_by_hash["$metadata_hash"]="$metadata_jira"
+        owner_subject_first_by_hash["$metadata_hash"]="$metadata_subject_first"
+    done <"$owner_metadata_file"
     local hit_linenum=0
     local line_number=0
     local find_done=0
@@ -4621,7 +5045,8 @@ function changelog_find_owner {
             processed_task_count=$((processed_task_count + 1))
             echo $((processed_task_count * 100 / task_count)) >$spin_percent_file
         }
-        local persent=$([ -f $spin_percent_file ] && cat $spin_percent_file)
+        local persent=""
+        [ -f "$spin_percent_file" ] && persent=$(<"$spin_percent_file")
         pulse_diagnosis 101 $persent "$$persent  line: $line_number"
         [[ $module_hit = 'sport' ]] && {
             if [[ "$line" == *" changed from "* ]]; then
@@ -4636,7 +5061,8 @@ function changelog_find_owner {
             fi
         } || find_done=1
         [[ "$line" == *" changed from "* ]] && {
-            local project_name=$(echo "$line" |awk '{print $1}')
+            local project_name node_range
+            read -r project_name _ <<<"$line"
             if [[ "$output_type" == "table" ]]; then
                 project_name_out="| Project: $project_name |"
             elif [[ "$output_type" == "csv" ]]; then
@@ -4648,22 +5074,25 @@ function changelog_find_owner {
             else
                 project_name_out="Project: $project_name"
             fi
-            minus_node=$(echo "$line" |awk -F 'changed from' '{print $2}' |awk -F 'to' '{print $1}' |xargs)
-            plus_node=$(echo "$line" |awk -F 'changed from' '{print $2}' |awk -F 'to' '{print $2}' |xargs)
+            node_range="${line#* changed from }"
+            minus_node=$(trim_whitespace "${node_range%% to *}")
+            plus_node=$(trim_whitespace "${node_range#* to }")
             continue
         }
         if [ -n "${filter_type:-}" ]; then
-            local commit_type=$(echo "$line" | grep -E '\[\+|\[-\]' |awk '{print $3}')
-            log_assert $? "$line"
+            local commit_mark commit_hash commit_type
+            read -r commit_mark commit_hash commit_type _ <<<"$line"
             pulse_diagnosis $hit_linenum $line_number "hit line-number"
             [[ "$commit_type" != "$filter_type" ]] && continue
         fi
         [ $find_done = 1 ] && {
-            local commit_hash=$(echo "$line" | grep -E '\[\+|\[-\]' > /dev/null && echo "$line" | awk '{print $2}')
-            log_assert $? "$line"
+            local commit_mark commit_hash commit_type
+            [[ "$line" =~ \[[+-]\] ]] || continue
+            read -r commit_mark commit_hash commit_type _ <<<"$line"
             pulse_diagnosis $hit_linenum $line_number "hit line-number"
             [[ -z "$commit_hash" ]] && continue
-            local commit_sign=$(echo "$line" |awk -F '[\\[\\]]' '{print $2}')
+            local commit_sign="${commit_mark#[}"
+            commit_sign="${commit_sign%]}"
             if [[ $commit_sign == '-' ]]; then
                 commit_where="$minus_node"
             elif [[ $commit_sign == '+' ]]; then
@@ -4672,28 +5101,97 @@ function changelog_find_owner {
                 commit_where="unKnown"
             fi
             ((counter++))
-            ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set commit:$commit_hash >$temp_file
-            local result_count=$(grep -w "^rowCount:" $temp_file |wc -l)
-            log_assert $? "$line"
+            local query_cache_file="$OWNER_QUERY_CACHE_DIR/$commit_hash"
+            local result_count="${owner_result_count_by_hash[$commit_hash]:-0}"
+            local link_count="${owner_link_count_by_hash[$commit_hash]:-0}"
+            if [[ $result_count -eq 0 ]]; then
+                log_w "SSH connection failed or Gerrit query error"
+                continue
+            fi
             pulse_diagnosis $hit_linenum $line_number "hit line-number"
             [ $result_count -gt 1 ] && echo "[rowCount]  $counter> $rowCount" >>$changelog_error && continue
-            local link_count=$(grep -w "^rowCount:" $temp_file | cut -d ':' -f2)
-            log_assert $? "$line"
             pulse_diagnosis $hit_linenum $line_number "hit line-number"
             [[ $link_count -gt 1 ]] && {
+                cp "$query_cache_file" "$temp_file"
                 echo $commit_hash >>$commit_hash_repeat
-                local commit_comment=$(echo "$line" | grep '[+-]' | awk -F "|" '{print $2}')
-                log_assert $? "$line"
+                local commit_subject="${line#*"$commit_hash"}"
+                commit_subject=$(trim_whitespace "$commit_subject")
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
-                local escaped_commit_comment="$(escape_for_grep "$commit_comment")"
-                local change_number=$(grep -E -B 1 "subject: .*$escaped_commit_comment" $temp_file |grep -w 'number:' |cut -d ':' -f2)
-                log_assert $? "$line"
-                diagnose_cmd "grep -E -B 1 \"subject: .*$escaped_commit_comment\" $temp_file |grep -w 'number:'"
+                local change_number
+                change_number=$(awk -v target="$commit_subject" '
+                    function normalized(value) {
+                        gsub(/[[:space:]]+/, " ", value)
+                        sub(/^ /, "", value)
+                        sub(/ $/, "", value)
+                        return value
+                    }
+                    /^[[:space:]]*number:/ {
+                        number=$2
+                        next
+                    }
+                    /^[[:space:]]*subject:/ {
+                        subject=$0
+                        sub(/^[[:space:]]*subject:[[:space:]]*/, "", subject)
+                        if (normalized(subject) == normalized(target)) {
+                            matched_number=number
+                            match_count++
+                        }
+                    }
+                    END {
+                        if (match_count == 1)
+                            print matched_number
+                    }
+                ' "$temp_file")
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
-                ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query --current-patch-set change:$change_number >$temp_file
+                [[ -z $change_number ]] && {
+                    log_w "Cannot resolve duplicate short hash: $commit_hash"
+                    continue
+                }
+                ssh -n \
+                    -o ControlMaster=auto \
+                    -o ControlPersist=600 \
+                    -o ControlPath="$OWNER_CONTROL_PATH" \
+                    -p 29418 "$GERRIT_USER@$GERRIT_HOST" \
+                    gerrit query --current-patch-set "change:$change_number" >$temp_file || {
+                    log_w "SSH connection failed or Gerrit query error"
+                    continue
+                }
             }
-            local owner_name=$(grep -A 1 'owner:' $temp_file | grep 'name:' | cut -d ':' -f2)
-            log_assert $? "$line"
+            local owner_name="${owner_name_by_hash[$commit_hash]}"
+            local gerrit_url="${owner_url_by_hash[$commit_hash]}"
+            local jira_describe="${owner_jira_by_hash[$commit_hash]}"
+            local subject_first="${owner_subject_first_by_hash[$commit_hash]}"
+            if [[ $link_count -gt 1 ]]; then
+                local -a query_metadata
+                mapfile -t query_metadata < <(awk '
+                    /^[[:space:]]*owner:/ { in_owner=1; next }
+                    in_owner && /^[[:space:]]*name:/ && owner == "" {
+                        value=$0
+                        sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+                        owner=" " value
+                        in_owner=0
+                        next
+                    }
+                    /^[[:space:]]*url:/ && url == "" {
+                        url=$0
+                        sub(/^[[:space:]]*url:[[:space:]]*/, "", url)
+                        next
+                    }
+                    /^[[:space:]]*subject:/ && subject == "" {
+                        subject=$0
+                        sub(/^[[:space:]]*subject:[[:space:]]*/, "", subject)
+                        part_count=split(subject, parts, "|")
+                        jira_description=(part_count > 1 ? parts[2] : "")
+                        split(subject, words, /[[:space:]]+/)
+                        subject_first=words[1]
+                    }
+                    END { print owner; print url; print jira_description; print subject_first }
+                ' "$temp_file")
+                owner_name="${query_metadata[0]}"
+                gerrit_url="${query_metadata[1]}"
+                jira_describe="${query_metadata[2]}"
+                subject_first="${query_metadata[3]}"
+            fi
             pulse_diagnosis $hit_linenum $line_number "hit line-number"
             local owner_describe="  【owner】 $owner_name"
             [[ ${EXEC_PARAMS[@]} =~ '--assign' ]] && {
@@ -4702,20 +5200,22 @@ function changelog_find_owner {
             [[ -n $project_name_out ]] && echo -e "$project_name_out" >>$changelog_out
             unset project_name_out
             if [[ "$output_type" == "md" || "$output_type" == "table" || "$output_type" == "html" ]]; then
-                local gerrit_url=$(grep 'url:' $temp_file | cut -d ' ' -f4)
-                log_assert $? "$line"
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 [ ! $gerrit_url ] && echo "[gerrit-url]  $counter> $commit_hash" >>$changelog_error && continue
-                jira_describe=$(grep 'subject:' $temp_file | cut -d '|' -f2)
-                log_assert $? "$line"
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
-                local jira_number=$(echo $jira_describe | cut -d '>' -f1 | xargs)
+                local jira_number="${jira_describe%%>*}"
+                jira_number="${jira_number#"${jira_number%%[![:space:]]*}"}"
+                jira_number="${jira_number%"${jira_number##*[![:space:]]}"}"
                 [[ ! $jira_number ]] && {
-                    jira_number=$(grep 'subject:' $temp_file | cut -d ' ' -f4)
-                    log_assert $? "$line"
+                    jira_number="$subject_first"
                     pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 }
-                local jira_text=$(echo $jira_describe | cut -d '>' -f2 | xargs -0)
+                local jira_text
+                if [[ $jira_describe == *">"* ]]; then
+                    jira_text="${jira_describe#*>}"
+                else
+                    jira_text="$jira_describe"
+                fi
                 [ $last_cmd = '-v' ] && echo "$counter> [$jira_number] $jira_text  $owner_name"
                 if [[ "$output_type" == "md" ]]; then
                     echo "* ($sub_counter)  $owner_name [$jira_number](https://jira.huami.com/browse/$jira_number) > [$jira_text]($gerrit_url)" >>$changelog_out
@@ -4732,16 +5232,14 @@ function changelog_find_owner {
                 fi
                 ((sub_counter++))
             elif [[ "$output_type" == "csv" ]]; then
-                local commit_hash=$(echo "$line" |awk '{print $2}')
-                local jira1=$(echo "$line" |awk -F '|' '{print $1}' |awk '{print $3}')
-                local jira2=$(echo "$line" |awk -F '|' '{print $2}')
+                local jira1="$commit_type"
+                local jira2="${line#*|}"
+                jira2="${jira2%%|*}"
                 local jira_text="$jira1 | $jira2"
                 echo "$commit_where,$sub_counter,$owner_name,$commit_hash,$jira_text" >>$changelog_out
                 ((sub_counter++))
             else
                 [[ $last_cmd = '-v' ]] && {
-                    local commit_type=$(echo "$line" | grep -E '\[\+|\[-\]' | awk '{print $3}')
-                    log_assert $? "$line"
                     pulse_diagnosis $hit_linenum $line_number "hit line-number"
                     echo $counter">: "$commit_hash": "$owner_describe": ["$commit_type"]"
                 }
@@ -4752,9 +5250,13 @@ function changelog_find_owner {
     if [[ "$output_type" == "html" ]]; then
         echo "</table>" >>$changelog_out
     fi
+    owner_close_control_connection
     mv $changelog_prefix $CHANGELOG_OUT
     echo -e "\nout: $CHANGELOG_OUT/$changelog_out"
     [ -f $temp_file ] && rm $temp_file
+    find "$OWNER_QUERY_STATUS_DIR" -type f -delete 2>/dev/null
+    rmdir "$OWNER_QUERY_STATUS_DIR" 2>/dev/null || true
+    rm -f "$OWNER_CONTROL_PATH"
     return 0
 }
 commit_count_from_gerrit() {
@@ -4779,104 +5281,249 @@ commit_count_from_gerrit() {
     local start=0
     local commit_cnt=0
     local temp_file="$(mktemp)"
-    local temp_file_dedup="$(mktemp)"
     local temp_file_number="$(mktemp)"
+    local temp_file_commit="$(mktemp)"
+    local temp_file_sort="$(mktemp)"
+    local temp_file_dates="$(mktemp)"
+    local GERRIT_COUNT_CONTROL_PATH="/tmp/dit-count-ssh-${BASHPID}"
+    local -a query_pipeline_status
+    local -a gerrit_count_ssh_options=(
+        -n
+        -o ConnectTimeout=10
+        -o ControlMaster=auto
+        -o ControlPersist=600
+        -o ControlPath="$GERRIT_COUNT_CONTROL_PATH"
+        -p 29418
+    )
     echo_c -c "All: Press Enter. N-days: Nd. N-weeks: Nw. N-month: Nm."
     read -p "Enter the number of days you want to query: " days
-    if is_number ${days%?}; then
+    if is_digits ${days%?}; then
         after_time=$(convert_iso8601_date $days)
         query_expr="$query_expr after:\"$after_time\""
     fi
     [[ $last_cmd = '?' ]] && echo_c -y "$query_expr"
-    echo "counting commit..."
+    echo "counting commit and code..."
+    start_spin
+    local total_commit_cnt=0
+    local count_start=0
     while true; do
-        ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $start >$temp_file
-        local tail_info=$(cat $temp_file |tail -n 5)
-        local user_verify=$(echo $tail_info |awk '{print $2}' |xargs)
-        [[ $user_verify = 'error' ]] && echo "!!No such person found" && return -1
-        local temp_cnt=$(echo $tail_info |awk '{print $4}' |xargs)
-        if hit_option '--dedup'; then
-            grep -e number: -e cherryPickOfChange $temp_file >$temp_file_dedup
-            awk '
-            {
-                gsub(/^[[:space:]]+/, "");
-                gsub(/[[:space:]]+$/, "");
-            }
-            NR == 1 {
-                prev = $0
-                is_prev_number = ($0 ~ /^number:/)
-                next
-            }
-            {
-                current = $0
-                is_current_number = ($0 ~ /^number:/)
-                is_current_cherry = ($0 ~ /^cherryPickOfChange:/)
-                if ((is_prev_number && is_current_cherry) || (is_current_number && is_prev_cherry)) {
-                    prev = ""
-                } else if (prev != "") {
-                    print prev
+        : >"$temp_file"
+        ssh "${gerrit_count_ssh_options[@]}" "$GERRIT_USER@$GERRIT_HOST" \
+            gerrit query --start "$count_start" $query_expr limit:500 | \
+        awk \
+            -v raw_out="$temp_file" \
+            -v processed_before="$total_commit_cnt" \
+            -v progress_out="$spin_percent_file" \
+        '
+            { print $0 >> raw_out }
+            /^change[[:space:]]/ {
+                page_seen++
+                if (page_seen % 10 == 0) {
+                    print "count:" processed_before + page_seen > progress_out
+                    close(progress_out)
                 }
-                prev = current
-                is_prev_number = ($0 ~ /^number:/)
-                is_prev_cherry = ($0 ~ /^cherryPickOfChange:/)
             }
             END {
-                if (prev != "" && !is_current_cherry) print prev
-            }' $temp_file_dedup >>$temp_file_number
-        else
-            grep number: $temp_file >>$temp_file_number
+                print "count:" processed_before + page_seen > progress_out
+                close(progress_out)
+            }
+        '
+        query_pipeline_status=("${PIPESTATUS[@]}")
+        if [[ ${query_pipeline_status[0]} -ne 0 || ${query_pipeline_status[1]} -ne 0 ]]; then
+            echo "!! Gerrit count query failed"
+            ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+                "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+            rm -f "$temp_file" "$temp_file_number" "$temp_file_commit" \
+                "$temp_file_sort" "$temp_file_dates"
+            return 1
         fi
-        commit_cnt=$((commit_cnt + temp_cnt))
-        local more=$(echo $tail_info |awk '{print $8}' |xargs)
-        [[ $more = 'false' ]] && break
-        start=$((start + 500))
+        if grep -qE '^[[:space:]]*type:[[:space:]]*error' "$temp_file"; then
+            echo "!!No such person found"
+            ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+                "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+            rm -f "$temp_file" "$temp_file_number" "$temp_file_commit" \
+                "$temp_file_sort" "$temp_file_dates"
+            return 1
+        fi
+        local count_page_size
+        local count_more
+        count_page_size=$(awk '/^rowCount:/ { print $2; exit }' "$temp_file")
+        count_more=$(awk '/^moreChanges:/ { print $2; exit }' "$temp_file")
+        count_page_size=${count_page_size:-0}
+        count_more=${count_more:-false}
+        total_commit_cnt=$((total_commit_cnt + count_page_size))
+        printf 'count:%d\n' "$total_commit_cnt" >"$spin_percent_file"
+        [[ $count_more = 'false' ]] && break
+        if [[ $count_page_size -le 0 ]]; then
+            echo "!! Gerrit reported moreChanges=true but returned no rows while counting"
+            break
+        fi
+        count_start=$((count_start + count_page_size))
     done
+    if [[ $total_commit_cnt -eq 0 ]]; then
+        ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+            "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+        rm -f "$temp_file" "$temp_file_number" "$temp_file_commit" \
+            "$temp_file_sort" "$temp_file_dates"
+        echo_c -y "!!Nothing"
+        return 0
+    fi
+    echo 0 >"$spin_percent_file"
+    while true; do
+        : >"$temp_file"
+        ssh "${gerrit_count_ssh_options[@]}" "$GERRIT_USER@$GERRIT_HOST" \
+            gerrit query --current-patch-set --start "$start" $query_expr limit:500 | \
+        awk \
+            -v raw_out="$temp_file" \
+            -v processed_before="$commit_cnt" \
+            -v total_count="$total_commit_cnt" \
+            -v progress_out="$spin_percent_file" \
+        '
+            { print $0 >> raw_out }
+            /^change[[:space:]]/ {
+                page_seen++
+                percent=int((processed_before + page_seen) * 100 / total_count)
+                if (percent > 100)
+                    percent=100
+                if (percent != last_percent) {
+                    print percent > progress_out
+                    close(progress_out)
+                    last_percent=percent
+                }
+            }
+        '
+        query_pipeline_status=("${PIPESTATUS[@]}")
+        if [[ ${query_pipeline_status[0]} -ne 0 || ${query_pipeline_status[1]} -ne 0 ]]; then
+            echo "!! Gerrit query failed"
+            ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+                "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+            rm -f "$temp_file" "$temp_file_number" "$temp_file_commit" \
+                "$temp_file_sort" "$temp_file_dates"
+            return 1
+        fi
+        if grep -qE '^[[:space:]]*type:[[:space:]]*error' "$temp_file"; then
+            echo "!!No such person found"
+            ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+                "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+            return 1
+        fi
+        local temp_cnt
+        local more
+        temp_cnt=$(awk '/^rowCount:/ { print $2; exit }' "$temp_file")
+        more=$(awk '/^moreChanges:/ { print $2; exit }' "$temp_file")
+        temp_cnt=${temp_cnt:-0}
+        more=${more:-false}
+        local dedup_mode=0
+        hit_option '--dedup' && dedup_mode=1
+        awk \
+            -v dedup_mode="$dedup_mode" \
+            -v number_out="$temp_file_number" \
+            -v commit_out="$temp_file_commit" \
+            -v sort_out="$temp_file_sort" \
+            -v dates_out="$temp_file_dates" \
+        '
+            function reset_change() {
+                in_change=0
+                change_number=""
+                insertions=0
+                deletions=0
+                created_on=""
+                updated_on=""
+                is_cherry_pick=0
+            }
+            function field_value(line,    value) {
+                value=line
+                sub(/^[^:]*:[[:space:]]*/, "", value)
+                return value
+            }
+            function flush_change() {
+                if (!in_change || change_number == "")
+                    return
+                if (!(dedup_mode && is_cherry_pick)) {
+                    print "number: " change_number >> number_out
+                    print "sizeInsertions: " insertions >> commit_out
+                    print "sizeDeletions: " deletions >> commit_out
+                    print change_number " sizeInsertions: " insertions >> sort_out
+                    print created_on sprintf("%c", 28) updated_on >> dates_out
+                }
+            }
+            BEGIN { reset_change() }
+            /^change[[:space:]]/ {
+                flush_change()
+                reset_change()
+                in_change=1
+                next
+            }
+            /^rowCount:/ {
+                flush_change()
+                reset_change()
+                next
+            }
+            in_change && change_number == "" && /^[[:space:]]*number:/ {
+                change_number=field_value($0)
+                next
+            }
+            in_change && /^[[:space:]]*cherryPickOfChange:/ {
+                is_cherry_pick=1
+                next
+            }
+            in_change && created_on == "" && /^[[:space:]]*createdOn:/ {
+                created_on=field_value($0)
+                next
+            }
+            in_change && updated_on == "" && /^[[:space:]]*lastUpdated:/ {
+                updated_on=field_value($0)
+                next
+            }
+            in_change && /^[[:space:]]*sizeInsertions:/ {
+                insertions=field_value($0) + 0
+                next
+            }
+            in_change && /^[[:space:]]*sizeDeletions:/ {
+                deletions=field_value($0) + 0
+                next
+            }
+            END { flush_change() }
+        ' "$temp_file"
+        commit_cnt=$((commit_cnt + temp_cnt))
+        local confirmed_percent=$((commit_cnt * 100 / total_commit_cnt))
+        [[ $confirmed_percent -gt 100 ]] && confirmed_percent=100
+        echo "$confirmed_percent" >"$spin_percent_file"
+        [[ $more = 'false' ]] && break
+        if [[ $temp_cnt -le 0 ]]; then
+            echo "!! Gerrit reported moreChanges=true but returned no rows"
+            break
+        fi
+        start=$((start + temp_cnt))
+    done
+    echo 100 >"$spin_percent_file"
     local valid_commit_cnt=$(wc -l <$temp_file_number)
-    rm $temp_file
-    rm $temp_file_dedup
+    rm -f "$temp_file"
     [[ $valid_commit_cnt -eq 0 ]] && {
-        rm $temp_file_number
+        ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+            "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+        rm -f "$temp_file_number" "$temp_file_commit" "$temp_file_sort" "$temp_file_dates"
         echo_c -y "!!Nothing"
         return 0
     }
-    if [[ $state = *-* ]]; then
-        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr |grep -m 1 'createdOn:' |awk -F 'createdOn:' '{print $2}' |xargs)
-        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr |grep -m 1 'lastUpdated:' |awk -F 'createdOn:' '{print $2}' |xargs)
-    else
-        local last_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
-        local last_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
-    fi
-    local first_create_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $((commit_cnt - 1)) limit:1 |awk -F 'createdOn:' '{print $2}' |xargs)
-    local first_update_date=$(ssh -p 29418 $GERRIT_USER@$GERRIT_HOST gerrit query $query_expr --start $((commit_cnt - 1)) limit:1 |awk -F 'lastUpdated:' '{print $2}' |xargs)
+    local newest_date_line oldest_date_line
+    local last_create_date last_update_date first_create_date first_update_date
+    newest_date_line=$(head -n 1 "$temp_file_dates")
+    oldest_date_line=$(tail -n 1 "$temp_file_dates")
+    IFS=$'\034' read -r last_create_date last_update_date <<<"$newest_date_line"
+    IFS=$'\034' read -r first_create_date first_update_date <<<"$oldest_date_line"
     echo "$name: $valid_commit_cnt / $commit_cnt"
-    echo "first date: "$first_create_date " ~ "$first_update_date
-    echo "last date: "$last_create_date " ~ "$last_update_date
-    echo "counting code..."
-    start_spin
-    local cnt=0
-    local sum_cnt=$(cat $temp_file_number |wc -l)
-    local temp_file_commit="$(mktemp)"
-    local temp_file_sort="$(mktemp)"
-    while read -r line; do
-        (( cnt++ ))
-        echo $((cnt * 100 / sum_cnt)) >$spin_percent_file
-        local change_number=$(echo $line |awk '{print $2}')
-        ssh -n -p 29418 "$GERRIT_USER@$GERRIT_HOST" gerrit query --current-patch-set "change:$change_number" | \
-        tee \
-            >(awk '/sizeInsertions:/ {print $0}' >>$temp_file_commit) \
-            >(awk '/sizeDeletions:/ {print $0}' >>$temp_file_commit) \
-            >(awk -v cnum="$change_number" '/sizeInsertions:/ {print cnum " " $0}' >>$temp_file_sort) \
-            > /dev/null 
-    done <$temp_file_number
-    echo "rowCount: "$cnt >>$temp_file_commit
-    count_code_line_from_gerrit $temp_file_commit
+    echo "first date: $first_create_date ~ $first_update_date"
+    echo "last date: $last_create_date ~ $last_update_date"
+    echo "rowCount: $valid_commit_cnt" >>"$temp_file_commit"
+    count_code_line_from_gerrit "$temp_file_commit"
     awk '/sizeInsertions:/ {print $1, $3}' "$temp_file_sort" | \
     sort -k2,2nr | \
     head -n 9 |\
     awk '{printf "%d. %s\n", NR, $0}'
-    rm $temp_file_number
-    rm $temp_file_commit
-    rm $temp_file_sort
+    ssh -n -o ControlPath="$GERRIT_COUNT_CONTROL_PATH" -p 29418 \
+        "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
+    rm -f "$temp_file_number" "$temp_file_commit" "$temp_file_sort" "$temp_file_dates"
 }
 env_cfg() {
     if hit_option '--repo'; then
@@ -4963,7 +5610,7 @@ function dit-cfg {
         --history)
             echo -e "\nWrite order of operation history file:\n0> LIFO\n1> FIFO"
             read -p ": " select
-            [[ $select =~ ^[0-9]+$ ]] && {
+            is_digits $select && {
                 if [ $select -eq 0 ]; then
                     echo "LIFO" >$DOT_DIT/history.cfg
                 elif [ $select -eq 1 ]; then
@@ -5327,7 +5974,8 @@ function END {
 function write_terminal_to_file {
     local only_out=0
     local original_tty=''
-    [ -d "$DOT_DIT" ] || mkdir -p "$DOT_DIT"
+    [ -f $TERMINAL_FILE ] && rm -f $TERMINAL_FILE
+    mkdir -p "$(dirname $TERMINAL_FILE)" && touch $TERMINAL_FILE
     if [ -z "$ORIG_TTY" ]; then
         if original_tty=$(tty 2>/dev/null) && [[ $original_tty == /dev/* ]]; then
             export ORIG_TTY="$original_tty"
@@ -5343,17 +5991,25 @@ function write_terminal_to_file {
             printf -v script_cmd '%q ' "$0" "$@"
             script_cmd=${script_cmd% }
             if [ $flush = 0 ]; then
-                exec script -q -a -c "$script_cmd" "$TERMINAL_FILE"
+                exec script -q -a -c "$script_cmd" $TERMINAL_FILE
             else
-                exec script -q -a -f -c "$script_cmd" "$TERMINAL_FILE"
+                exec script -q -a -f -c "$script_cmd" $TERMINAL_FILE
             fi
         fi
     fi
-    echo -e "\n@@"$(date +"%Y-%m-%d %H:%M:%S") >>"$TERMINAL_FILE"
+    echo -e "\n@@"$(date +"%Y-%m-%d %H:%M:%S") >>$TERMINAL_FILE
 }
-function main {
+create_directory() {
+    [ -d "$DOT_DIT" ] || mkdir -p "$DOT_DIT"
+    [ -d "$DIT_TMP" ] || mkdir -p "$DIT_TMP"
+}
+prepare_environment() {
     write_terminal_to_file "$@"
     init_terminal_fd
+    create_directory
+}
+function main {
+    prepare_environment "$@"
     cmd_check
     options_check
     [[ $last_cmd = '$' ]] && exit 0
