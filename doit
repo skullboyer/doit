@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Thu Sep  3 13:53:08 CST 2026 by skull  ver:26.9.3.1353
+#@create:Mon Sep  7 15:55:49 CST 2026 by skull  ver:26.9.7.1555
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -474,7 +474,11 @@ logF() {
     local log_level="$1"
     local log_tag="$2"
     local log_msg="$3"
-    log_tag="${log_tag#tag=}"
+    if hit_target tag= "$log_tag"; then
+        log_tag="${log_tag#tag=}"
+    else
+        log_tag=""
+    fi
     [ -z $log_tag ] && log_msg="$2"
     case $log_level in
         -D)
@@ -495,8 +499,12 @@ logF() {
             ;;
         *)
             log_tag="$1"
-            log_tag="${log_tag#tag=}"
-            if [ -z $log_tag ]; then
+            if hit_target tag= "$log_tag"; then
+                log_tag="${log_tag#tag=}"
+            else
+                log_tag=""
+            fi
+            if [[ -z $log_tag ]]; then
                 log_msg="$1"
                 echo -e "$log_msg" >>$LOG_FILE
             else
@@ -786,10 +794,6 @@ hit_option() {
     contains_element "$1" "${EXEC_PARAMS[@]}"
     return $?
 }
-hit_target() {
-    contains_element "$1" "$@"
-    return $?
-}
 find_keyword_regex() {
     local pattern="$1"
     shift                    
@@ -815,7 +819,7 @@ include_option() {
     find_keyword "$1" "${EXEC_PARAMS[@]}"
     return $?
 }
-match_keyword() {
+hit_target() {
     strict_contains_element "$1" "$@"
     return $?
 }
@@ -2261,20 +2265,20 @@ function dit-make {
                 [[ -f $DIT_BK_BIN/ota.version ]] && ver_number=$(head -1 $DIT_BK_BIN/ota.version |cut -d: -f2 |xargs)
                 [[ -f $OTA_VERSION ]] && new_ver_number=$(head -1 $OTA_VERSION |cut -d: -f2 |xargs)
                 [[ $input = yes ]] && [[ $ver_number != $new_ver_number ]] && {
-                    echo "backup ota-bin start"
+                    log "backup ota-bin start"
                     start_spin_bar
                     rm -rf $DIT_BK_BIN
                     rsync -a --relative out/watch@$hm_platform/binary $DIT_BK_BIN
                     [[ -d out_hub/sensorhub@$hm_platform/binary ]] && {
                         rsync -a --relative out_hub/sensorhub@$hm_platform/binary $DIT_BK_BIN
                     }
-                    cp $OTA_VERSION .
+                    cp $OTA_VERSION $DIT_BK_BIN
                     stop_spin_bar
                 }
             fi
             make clean
             make distclean
-            if hit_option '--firmware-ota' && [[ -d $DIT_BK_BIN ]] && [[ -n $hm_platform ]]; then
+            if ! hit_option '-o' && [[ -d $DIT_BK_BIN ]] && [[ -n $hm_platform ]]; then
                 local binary_res=$DIT_BK_BIN/out/watch@$hm_platform/binary
                 local sensor_binary_res=$DIT_BK_BIN/out_hub/sensorhub@$hm_platform/binary
                 (
@@ -2284,7 +2288,7 @@ function dit-make {
                     [[ -d $sensor_binary_res ]] && {
                         rsync -a --relative out_hub/sensorhub@$hm_platform/binary $current_path/build
                     }
-                    echo "restore ota-bin ok"
+                    log "restore ota-bin ok"
                 }
                 )
             fi
@@ -2320,9 +2324,18 @@ function dit-make {
             local product="${tmp%_defconfig}"
             [ $last_cmd = '?' ] && echo_c -y "hm_platform: $hm_platform  tmp: $tmp  product: $product"
             echo "other core: build ${hm_platform}" >>$OTA_VERSION
-            [ -d out_hub ] && rm -rf out_hub
-            if make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub && \
-                make BUILD_DIR=out_hub APPDIR=out_hub BUILD_TYPE=$debug_release BUILD_FW_VER=$version; then
+            local -a sensorhub_make_args=(
+                "BUILD_DIR=out_hub"
+                "APPDIR=out_hub"
+                "BUILD_FW_VER=$version"
+                "-j16"
+            )
+            [[ $debug_release == release ]] && sensorhub_make_args+=("BUILD_TYPE=$debug_release")
+            if { hit_option '-d' || {
+                    rm -rf out_hub &&
+                    make ${hm_platform}_${product}_sensorhub_defconfig APPDIR=out_hub;
+                };
+            } && make "${sensorhub_make_args[@]}"; then
                 sensorhub_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}.bin
                 sensorhub_sign_bin=out_hub/sensorhub@${hm_platform}/binary/sensorhub@${hm_platform}_sign.bin
                 extfw_path=out/watch@$hm_platform/binary/extfw
