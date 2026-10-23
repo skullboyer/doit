@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Mon Sep  7 15:55:49 CST 2026 by skull  ver:26.9.7.1555
+#@create:Wed Oct 14 16:24:11 CST 2026 by skull  ver:26.10.14.1624
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -85,7 +85,7 @@ $script_name sync [-C] [--depth] [--repo] [--rebase] [--time] [--jobs]
 xml操作
 $script_name xml [-s] [-g] [-d]
     -s [-s/switch] [--branch] [--xml] {fallback-depth}
-        --branch            切manifests仓分支
+        --branch            切manifests仓分支，缺省则在当前分支切xml
         --xml               要切换的xml配置文件
         {fallback-depth}    切换前净化代码仓的回滚深度，此参数可选
     -g [-g/generate]    生成当前代码节点xml
@@ -153,7 +153,7 @@ $script_name diff [-p] [-v] [-i] [-a] [-c] [-x] [--suffix] [--exclude] [--path] 
     -v  view            检查仓内工作区文件修改情况，同时在终端输出细节，可配合选项--suffix、--exclude使用
     -c  specify         检查指定文件变化的代码仓，格式：-c --file +file1 +file2 ...
                         检查指定文件类型变化的代码仓，格式：-c --suffix +type1 +type2 ...
-    -x  untracked       检查仓内变化，包括未跟踪的文件，可使用格式：-x --suffix +type1 +type2 ... 来排除仅特定格式文件变化的仓以缩减有效范围，缺省则排除文件格式为'.gapp'
+    -x  untracked       检查仓内变化，包括未跟踪的文件，可使用格式：-x --suffix +type1 +type2 ... 来排除仅特定格式文件变化的仓以缩减有效范围，缺省则排除文件格式为'.gapp, .bin'
     --suffix            加入查看的文件类型，格式：--suffix +type1 +type2 ...
     --exclude           排除要查看的文件或格式，格式：--exclude file1 file2 *.suffix ...
     --path              检查指定目录关键字的代码仓文件修改情况，格式：-i/-a[-v] --path +sport +config
@@ -196,12 +196,15 @@ $script_name tiny [-p] [-t]
     tips:               项目生成的升级包与bak/[product]文件夹中的升级包做差分包存至目录bak/[product]/diff，同时将上传至桌面文件夹[product]/tiny
 
 代码仓分支操作
-$script_name branch [-v] [-n] [-x] [-d] [-s]
+$script_name branch [-v] [-n] [-x] [-d] [-s] [-f]
     -v  view            查看指定分支存在的代码仓，若想看所有分支，可输入空 ''，""，' '，" "
     -n  exclude         查看指定分支不存在的代码仓
     -x  active          查看指定分支激活的代码仓
     -d  delete          删除指定分支
     tips:               上述选项后跟分支名，结果存入branch.tmp
+    -f  find            根据本地已有的远端提交图推测分支创建信息
+        {branch}            要查询的分支，可使用remote/branch消除多远端歧义
+        {repo-path}         仓库路径，缺省则查询.repo/manifests
     -s  switch          创建并切换分支
         --delete
         --create-all
@@ -1313,7 +1316,7 @@ over_make() {
     [[ -f $DECONFIG_PATH ]] && ! hit_option '-d' && {
         config_path=$(< $DECONFIG_PATH)
         config_select=$(echo ${config_path##*/})
-        cp $DIT_TMP/$config_select $current_path/$config_path
+        [[ -f $DIT_TMP/$config_select ]] && cp $DIT_TMP/$config_select $current_path/$config_path
     }
     [[ -f $DIT_TMP/board_bsd.file ]] && board_bsd_file=$(< $DIT_TMP/board_bsd.file)
     [[ -f $DIT_TMP/board_bsd.c ]] && cp $DIT_TMP/board_bsd.c $current_path/$board_bsd_file
@@ -1483,6 +1486,154 @@ switch_branch() {
         [[ -n $1 && -n $2 && $3 = "--create-remote" ]] && git -C $line checkout -b $1 origin/$2 && continue
         [[ -n $1 && -n $2 && $3 = "--delete" ]] && git -C $line checkout $1 && git -C $line branch -D $2 && continue
     done < .$script_name/dir.branch.tmp
+}
+find_branch() {
+    local branch_name="$1"
+    [ -z "$branch_name" ] && echo_c -y "Please input correct arguments!" && return 1
+    local repo_path="$2"
+    [ -z "$repo_path" ] && repo_path="$current_path/.repo/manifests"
+    if ! git -C "$repo_path" rev-parse --git-dir >/dev/null 2>&1; then
+        echo_c -y "Not a git repository: $repo_path"
+        return 1
+    fi
+    local branch_ref upstream_ref ref short_ref
+    local -a matching_remote_refs=()
+    case "$branch_name" in
+        refs/heads/*|refs/remotes/*)
+            branch_ref="$branch_name"
+            ;;
+        *)
+            if git -C "$repo_path" show-ref --verify --quiet "refs/remotes/$branch_name"; then
+                branch_ref="refs/remotes/$branch_name"
+            elif git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch_name"; then
+                upstream_ref=$(git -C "$repo_path" for-each-ref \
+                    --format='%(upstream)' "refs/heads/$branch_name")
+                if [[ $upstream_ref == refs/remotes/* ]] && \
+                    git -C "$repo_path" show-ref --verify --quiet "$upstream_ref"; then
+                    branch_ref="$upstream_ref"
+                elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+                    branch_ref="refs/remotes/origin/$branch_name"
+                else
+                    branch_ref="refs/heads/$branch_name"
+                fi
+            elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+                branch_ref="refs/remotes/origin/$branch_name"
+            fi
+            if [ -z "$branch_ref" ]; then
+                while IFS= read -r ref; do
+                    short_ref=${ref#refs/remotes/}
+                    [[ $short_ref == */"$branch_name" ]] && matching_remote_refs+=("$ref")
+                done < <(git -C "$repo_path" for-each-ref --format='%(refname)' refs/remotes)
+                if [ ${#matching_remote_refs[@]} -eq 1 ]; then
+                    branch_ref=${matching_remote_refs[0]}
+                elif [ ${#matching_remote_refs[@]} -gt 1 ]; then
+                    echo_c -y "Branch exists in multiple remotes; specify remote/name: $branch_name"
+                    printf '  %s\n' "${matching_remote_refs[@]#refs/remotes/}"
+                    return 1
+                fi
+            fi
+            if [ -z "$branch_ref" ]; then
+                echo_c -y "Branch does not exist: $branch_name"
+                return 1
+            fi
+            ;;
+    esac
+    if ! git -C "$repo_path" show-ref --verify --quiet "$branch_ref"; then
+        echo_c -y "Branch does not exist: $branch_name"
+        return 1
+    fi
+    start_spin
+    local display_branch=${branch_ref#refs/heads/}
+    display_branch=${display_branch#refs/remotes/}
+    local remote_name="" target_hash
+    local -a candidate_refs=() comparison_refs=() containing_target_refs=()
+    if [[ $branch_ref == refs/remotes/* ]]; then
+        short_ref=${branch_ref#refs/remotes/}
+        remote_name=${short_ref%%/*}
+        while IFS= read -r ref; do
+            [[ $ref == "$branch_ref" || $ref == refs/remotes/*/HEAD ]] && continue
+            candidate_refs+=("$ref")
+        done < <(git -C "$repo_path" for-each-ref --format='%(refname)' \
+            "refs/remotes/$remote_name")
+    else
+        while IFS= read -r ref; do
+            [[ $ref == "$branch_ref" || $ref == refs/remotes/*/HEAD ]] && continue
+            candidate_refs+=("$ref")
+        done < <(git -C "$repo_path" for-each-ref --format='%(refname)' \
+            refs/remotes refs/heads)
+    fi
+    if [ ${#candidate_refs[@]} -eq 0 ]; then
+        printf 'Branch: %s\nCreation time (estimated): unknown\nParent branch (estimated): unknown\nHash (estimated creation point): unknown\nReason: no comparison branches are available locally\n' \
+            "$display_branch"
+        return 0
+    fi
+    target_hash=$(git -C "$repo_path" rev-parse "$branch_ref")
+    local -A containing_target_set=()
+    while IFS= read -r ref; do
+        containing_target_set["$ref"]=1
+    done < <(git -C "$repo_path" for-each-ref --contains="$target_hash" \
+        --format='%(refname)' refs/remotes refs/heads)
+    for ref in "${candidate_refs[@]}"; do
+        if [ -n "${containing_target_set[$ref]:-}" ]; then
+            containing_target_refs+=("$ref")
+        else
+            comparison_refs+=("$ref")
+        fi
+    done
+    if [ ${#comparison_refs[@]} -eq 0 ]; then
+        printf 'Branch: %s\nCreation time (estimated): unknown\nParent branch (estimated): unknown\nHash (estimated creation point): unknown\nReason: every comparison branch already contains the target branch\n' \
+            "$display_branch"
+        return 0
+    fi
+    local first_unique_hash=""
+    first_unique_hash=$(git -C "$repo_path" rev-list --first-parent --reverse \
+        "$branch_ref" --not "${comparison_refs[@]}" | head -n 1)
+    if [ -z "$first_unique_hash" ]; then
+        printf 'Branch: %s\nCreation time (estimated): unknown\nParent branch (estimated): unknown\nHash (estimated creation point): unknown\nReason: no commit unique to the target branch was found\n' \
+            "$display_branch"
+        return 0
+    fi
+    local fork_hash creation_time
+    if ! fork_hash=$(git -C "$repo_path" rev-parse "$first_unique_hash^1" 2>/dev/null); then
+        printf 'Branch: %s\nCreation time (estimated): unknown\nParent branch (estimated): unknown\nHash (estimated creation point): unknown\nFirst unique commit: %s\nReason: the first unique commit has no parent\n' \
+            "$display_branch" "$first_unique_hash"
+        return 0
+    fi
+    creation_time=$(git -C "$repo_path" show -s --format='%cI' "$first_unique_hash")
+    local parent_branch="unknown"
+    local -A comparison_ref_set=()
+    local -a parent_refs=() parent_names=()
+    for ref in "${comparison_refs[@]}"; do
+        comparison_ref_set["$ref"]=1
+    done
+    while IFS= read -r ref; do
+        [ -n "${comparison_ref_set[$ref]:-}" ] && parent_refs+=("$ref")
+    done < <(git -C "$repo_path" for-each-ref --contains="$fork_hash" \
+        --format='%(refname)' refs/remotes refs/heads)
+    for ref in "${parent_refs[@]}"; do
+        short_ref=${ref#refs/remotes/}
+        short_ref=${short_ref#refs/heads/}
+        parent_names+=("$short_ref")
+    done
+    if [ ${#parent_names[@]} -eq 1 ]; then
+        parent_branch=${parent_names[0]}
+    elif [ ${#parent_names[@]} -gt 1 ]; then
+        parent_branch="ambiguous (${#parent_names[@]}) refs share the fork point\n  ${parent_names[@]}"
+    fi
+    printf 'Branch: %s\nCurrent Hash: %s\nCreation time (estimated): %s (first unique commit time)\nParent branch (estimated): %b\nHash (estimated creation point): %s\nFirst unique commit: %s\nComparison branches: %s\n' \
+        "$display_branch" "$target_hash" "$creation_time" "$parent_branch" "$fork_hash" \
+        "$first_unique_hash" "${#comparison_refs[@]}"
+    if [ ${#containing_target_refs[@]} -gt 0 ]; then
+        printf 'Note: %s branches containing the target tip were excluded as ambiguous\n' \
+            "${#containing_target_refs[@]}"
+    fi
+    git -C "$repo_path" log -1 $first_unique_hash
+    [ ${#parent_names[@]} -gt 1 ] && {
+        git -C "$repo_path" log --graph --oneline --boundary --simplify-by-decoration --decorate-refs-exclude="refs/tags/*" $branch_ref ${parent_names[@]}
+        echo -e "\nsee more details in gitk:\ngitk $branch_ref ${parent_names[@]}"
+        echo -e "see more details in git:\ngit -C \"$repo_path\" log --graph --oneline --boundary --simplify-by-decoration --decorate-refs-exclude=\"refs/tags/*\" --all"
+        echo "git -C \"$repo_path\" log --graph --oneline --boundary --decorate-refs-exclude=\"refs/tags/*\" $branch_ref ${parent_names[@]}"
+    }
 }
 squash_commit_create_branch() {
     origin_branch="origin/$1"
@@ -1758,9 +1909,15 @@ get_active_map_remote_branch() {
     local branch=$(git rev-parse --abbrev-ref --symbolic-full-name @{u})
     echo "$branch"
 }
+write_code_info() {
+    branch_name=$1
+    xml_name=$2
+    echo $(date) >$CODE_INFO
+    echo "branch: "$branch_name >>$CODE_INFO
+    echo "xml: "$xml_name >>$CODE_INFO
+}
 update_code_info() {
     if is_valid_cmd 'init'; then
-        echo $(date) >$CODE_INFO
         branch_name=master
         if hit_option '-b'; then
             get_option_index_and_value -b
@@ -1769,7 +1926,6 @@ update_code_info() {
                 branch_name="$branch"
             fi
         fi
-        echo "branch: "$branch_name >>$CODE_INFO
         xml_name=huamiOS
         if hit_option '-x'; then
             get_option_index_and_value -x
@@ -1778,21 +1934,19 @@ update_code_info() {
                 xml_name="$xml"
             fi
         fi
-        echo "xml: "$xml_name >>$CODE_INFO
+        write_code_info $branch_name $xml_name
     elif is_valid_cmd 'sync'; then
-        echo $(date) >$CODE_INFO
         cd .repo/manifests
         if ret=$(get_current_branch); then
-            branch="$ret"
+            branch_name="$ret"
         else
             echo "$ret"
-            branch="unKnown"
+            branch_name="unKnown"
         fi
         cd - >/dev/null
-        echo "branch: "$branch >>$CODE_INFO
-        xml=$(sed -nE "s/.*['\"]([^'\"]*\.xml[^'\"]*)['\"].*/\1/p" .repo/manifest.xml)
-        [[ -z $xml ]] && xml="unKnown"
-        echo "xml: "$xml >>$CODE_INFO
+        xml_name=$(sed -nE "s/.*['\"]([^'\"]*\.xml[^'\"]*)['\"].*/\1/p" .repo/manifest.xml)
+        [[ -z $xml_name ]] && xml_name="unKnown"
+        write_code_info $branch_name $xml_name
     fi
 }
 count_code_line_from_gerrit() {
@@ -2017,9 +2171,14 @@ function dit-xml {
             [[ $manifest_branch ]] && {
                 rm -rf .repo
                 $script init -b=$manifest_branch -x=$manifest_xml
-                return $?
+                local ret=$?
+                [ $ret -eq 0 ] && write_code_info $manifest_branch $manifest_xml
+                return $ret
             }
             repo init -m ${manifest_xml%.*}.xml
+            [ $? -ne 0 ] && return -1
+            local branch_name=$(grep branch $CODE_INFO |cut -d ' ' -f2)
+            write_code_info $branch_name $manifest_xml
             echo -e "\n\e[42m===========================================================================================\e[0m\n"
             repo sync -c -j16
             ;;
@@ -2090,7 +2249,11 @@ function dit-sync {
     if hit_option '--time'; then
         get_option_index_and_value --time
         input_time=$OPTION_VALUE
-        [ -z "$input_time" ] && echo_c -y "please enter the time" && return 1
+        [ -z "$input_time" ] && {
+            echo "绝对时间：HH:MM, YYYY-MM-DD, YYYY-MM-DD HH, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS"
+            echo "相对时间：1s: second ago, 1m, 1h, 1d, 1w, 1mo, 1y"
+            read -p "please enter the time: " input_time
+        }
         if ! _time=$(time_result $input_time); then
             echo "$_time"
             echo_c -y "Please enter a valid time"
@@ -2100,7 +2263,7 @@ function dit-sync {
         [[ -n $tmp_data ]] && echo_c -y "repo is dirty" && echo "$tmp_data" && return 3
         repo sync
         repo forall -p -c "
-            commit_id=\$(git log --date=format:'%Y-%m-%d %H:%M:%S' --pretty=format:'%ad %h' --before='$_time' | head -n 1 | cut -d ' ' -f3)
+            commit_id=\$(git log --date=format:'%Y-%m-%d %H:%M:%S' --pretty=format:'%cd %h' --before='$_time' | head -n 1 | cut -d ' ' -f3)
             [ -n \"\$commit_id\" ] && git checkout \"\$commit_id\" >/dev/null 2>&1\
         "
         return
@@ -2726,9 +2889,19 @@ function dit-diff {
         unset file_exclude
     elif [[ $arg2 = '-x' ]]; then
         type_special=$(echo $type_special | sed 's/\*.//g' | sed 's/ /|/g')
-        [ -z $type_special ] && type_special="gapp"
-        repo forall -p -c 'if git diff --name-only |grep -vE "\.('"$type_special"')$" >/dev/null; then git status --porcelain; fi' |tee -a $REPO_DIFF
+        [ -z $type_special ] && type_special="gapp|bin"
+        repo forall -p -c '
+            if git status --porcelain -uall |grep -vE "\.('"$type_special"')$" >/dev/null; then
+                git status -s -uall
+                git diff --shortstat
+            fi
+        ' |tee -a $REPO_DIFF
         echo -e "\n"$split_line"\n" >> $REPO_DIFF
+        repo forall -p -c '
+            if git status --porcelain -uall |grep -vE "\.('"$type_special"')$" >/dev/null; then
+                git diff
+            fi
+        ' >>$REPO_DIFF
         unset file_exclude
     fi
     [ ${#file_exclude[@]} -ne 0 ] && {
@@ -2894,7 +3067,7 @@ prompt="
                     ;;
                 V)
                     unset assign_file
-                    read -p "> assign file: " assign_file
+                    read -p "> assign file (Press <Enter> to view all): " assign_file
                     if [[ -n $assign_file && -f $assign_file ]]; then
                         if git status --porcelain -- "$assign_file" |grep '^??'; then
                             if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
@@ -2936,14 +3109,13 @@ prompt="
                     read_c -y "bug fix [yes]: " editor_input
                     [[ $editor_input = yes ]] && editor=1
                     case "$editor" in
-                        1)
-fix_commit_message="
-fix | - >
-[关联提交]
-[原因分析]
-[解决方案]
-[自测场景]
-"
+                            1)
+                            printf -v fix_commit_message '\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n' \
+                                'fix | - >' \
+                                '[关联提交]' \
+                                '[原因分析]' \
+                                '[解决方案]' \
+                                '[自测场景]'
                             tmpfile=$(mktemp)
                             echo -e "\nOpening vim... Please edit and save."
                             printf "%s" "$fix_commit_message" >$tmpfile
@@ -2951,7 +3123,7 @@ fix | - >
                             temp_message=$(cat "$tmpfile")
                             rm "$tmpfile"
                             echo_c -g "> commit message:"
-                            echo "temp_message"
+                            printf '%s\n' "$temp_message"
                             ;;
                         *)
                             echo -e "\n> commit message (press Ctrl+D to finish. To go back, input 'Q'.):"
@@ -3081,7 +3253,7 @@ prompt_single_push="
                                     ;;
                                 V)
                                     unset assign_file
-                                    read -p " assign file: " assign_file
+                                    read -p " assign file (Press <Enter> to view all): " assign_file
                                     if [[ -n $assign_file && -f $assign_file ]]; then
                                         if git status --porcelain -- "$assign_file" |grep '^??'; then
                                             if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
@@ -3695,6 +3867,10 @@ function dit-branch {
                 } || {
                     [[ ${EXEC_PARAMS[@]} =~ '-s' ]] && {
                         switch_branch $arg3 $arg4 $arg5
+                    } || {
+                        hit_option '-f' && {
+                            find_branch $arg3 $arg4
+                        }
                     }
                 }
             }
