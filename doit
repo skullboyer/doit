@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#@create:Wed Oct 14 16:24:11 CST 2026 by skull  ver:26.10.14.1624
+#@create:Fri Oct 23 15:59:08 CST 2026 by skull  ver:26.10.23.1559
 # Copyright © 2022-2026 <copyright skull.gu@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -284,6 +284,7 @@ $script_name tools [map] [crc] [display] [owner] [commit] [env]
             [only]              仅做去重处理
         --module            指定代码仓对应的模块关键字，指定后仅处理该关键字对应的仓库，当前支持关键字 sport，缺省则为全部
         --assign            指定提交者，缺省则指所有
+        --name              在 [-]/[+] 分类结果中按 owner 姓名分组，可独立使用
         --type              指定提交类型
             [fix]               修复
             [feat]              需求
@@ -2219,13 +2220,21 @@ function dit-xml {
                 return 1
             fi
             local _date=$(date "+%Y%m%d")
-            repo diffmanifests $old.xml $new.xml >master_changelog-$_date.txt
-            mv master_changelog-$_date.txt $current_path
+            local changelog="changelog-$_date.txt"
+            repo diffmanifests "$old.xml" "$new.xml" >"$changelog"
+            local ret=$?
+            if [ $ret -ne 0 ]; then
+                echo_c -y "repo diffmanifests failed, exit code: $ret"
+                rm -f "$changelog"
+                cd - >/dev/null
+                return $ret
+            fi
+            mv "$changelog" "$current_path"
             rm $old.xml $new.xml
             cd - >/dev/null
-            absolute_path=$(realpath "master_changelog-$_date.txt")
+            absolute_path=$(realpath "$changelog")
             directory=$(dirname "$absolute_path")
-            echo master_changelog-$_date.txt " in " $directory
+            echo $changelog " in " $directory
             ;;
         *)
             echo -e "\n!!Please check the option parameters"
@@ -4742,6 +4751,7 @@ function deduplicate_changelog_process {
 function deduplicate_changelog_process_fast {
     local changelog="$1"
     local deduplicate_name="${2:-deduplicate.changelog}"
+    local metadata_file="${3:-}"
     local duplicate_changelog="$CHANGELOG_OUT/duplicate.changelog"
     local deduplicate_changelog="$CHANGELOG_OUT/$deduplicate_name"
     local changelog_process="$CHANGELOG_OUT/process.log"
@@ -4754,7 +4764,22 @@ function deduplicate_changelog_process_fast {
     awk \
         -v dedup_out="$deduplicate_changelog" \
         -v dup_out="$duplicate_changelog" \
+        -v metadata_file="$metadata_file" \
+        -v stats_out="$changelog_process" \
     '
+        function load_metadata(    line, fields, key) {
+            if (metadata_file == "")
+                return
+            while ((getline line < metadata_file) > 0) {
+                split(line, fields, /\t/)
+                key = fields[1] SUBSEP fields[2]
+                if (fields[1] != "" && fields[2] != "") {
+                    metadata_change_id[key] = fields[3]
+                    metadata_patch_id[key] = fields[4]
+                }
+            }
+            close(metadata_file)
+        }
         function clear_repo(    i) {
             for (i = 1; i <= count; i++) {
                 delete record[i]
@@ -4766,8 +4791,15 @@ function deduplicate_changelog_process_fast {
                 delete base_reason[i]
                 delete revert_depth[i]
                 delete effect[i]
-                delete identity[i]
-                delete next_unmatched[i]
+                delete project[i]
+                delete change_id[i]
+                delete patch_id[i]
+                delete change_identity[i]
+                delete patch_identity[i]
+                delete description_identity[i]
+                delete next_change[i]
+                delete next_patch[i]
+                delete next_description[i]
                 delete duplicate_event[i]
             }
             split("", stack_top)
@@ -4806,10 +4838,12 @@ function deduplicate_changelog_process_fast {
                 return
             keep[record_index] = 0
             duplicate_event[++duplicate_event_count] = record[record_index]
+            duplicate_record_count++
         }
         function process_repo(    i, j, fields, prefix, separator_index, payload,
                                   field_count, field_index, word_depth, depth,
-                                  operation_effect, node_effect, stack_key, opposite_key) {
+                                  operation_effect, node_effect, stack_key,
+                                  change_key, patch_key, description_key, match_key) {
             if (header == "")
                 return
             for (i = 1; i <= count; i++) {
@@ -4862,32 +4896,87 @@ function deduplicate_changelog_process_fast {
                 operation_effect = (depth % 2 == 0 ? 1 : -1)
                 node_effect = (status[i] == "[+]" ? 1 : -1)
                 effect[i] = operation_effect * node_effect
-                identity[i] = base_reason[i] SUBSEP description[i]
+                project[i] = project_name
+                change_id[i] = metadata_change_id[project_name SUBSEP commit_hash[i]]
+                patch_id[i] = metadata_patch_id[project_name SUBSEP commit_hash[i]]
+                if (change_id[i] != "")
+                    change_identity[i] = "C" SUBSEP change_id[i]
+                if (patch_id[i] != "")
+                    patch_identity[i] = "P" SUBSEP patch_id[i]
+                description_identity[i] = "D" SUBSEP description[i]
             }
             for (i = count; i >= 1; i--) {
                 if (reason[i] == "Merge") {
                     mark_duplicate(i)
+                    merge_duplicate_count++
                     continue
                 }
-                if (identity[i] == "" || effect[i] == 0)
+                if (description_identity[i] == "" || effect[i] == 0)
                     continue
-                opposite_key = identity[i] SUBSEP (-effect[i])
-                j = stack_top[opposite_key]
+                j = 0
+                match_key = ""
+                if (change_identity[i] != "") {
+                    change_key = change_identity[i] SUBSEP (-effect[i])
+                    while (stack_top[change_key] && !keep[stack_top[change_key]])
+                        stack_top[change_key] = next_change[stack_top[change_key]]
+                    j = stack_top[change_key]
+                    if (j)
+                        match_key = change_key
+                }
+                if (!j && patch_identity[i] != "") {
+                    patch_key = patch_identity[i] SUBSEP (-effect[i])
+                    while (stack_top[patch_key] && !keep[stack_top[patch_key]])
+                        stack_top[patch_key] = next_patch[stack_top[patch_key]]
+                    j = stack_top[patch_key]
+                    if (j)
+                        match_key = patch_key
+                }
+                if (!j) {
+                    description_key = description_identity[i] SUBSEP (-effect[i])
+                    while (stack_top[description_key] && !keep[stack_top[description_key]])
+                        stack_top[description_key] = next_description[stack_top[description_key]]
+                    j = stack_top[description_key]
+                    if (j)
+                        match_key = description_key
+                }
                 if (j) {
-                    stack_top[opposite_key] = next_unmatched[j]
+                    if (match_key == change_key)
+                        stack_top[match_key] = next_change[j]
+                    else if (match_key == patch_key)
+                        stack_top[match_key] = next_patch[j]
+                    else
+                        stack_top[match_key] = next_description[j]
+                    if (substr(match_key, 1, 1) == "C")
+                        change_match_pair_count++
+                    else if (substr(match_key, 1, 1) == "P")
+                        patch_match_pair_count++
+                    else
+                        description_match_pair_count++
                     mark_duplicate(j)
                     mark_duplicate(i)
                 } else {
-                    stack_key = identity[i] SUBSEP effect[i]
-                    next_unmatched[i] = stack_top[stack_key]
+                    if (change_identity[i] != "") {
+                        stack_key = change_identity[i] SUBSEP effect[i]
+                        next_change[i] = stack_top[stack_key]
+                        stack_top[stack_key] = i
+                    }
+                    if (patch_identity[i] != "") {
+                        stack_key = patch_identity[i] SUBSEP effect[i]
+                        next_patch[i] = stack_top[stack_key]
+                        stack_top[stack_key] = i
+                    }
+                    stack_key = description_identity[i] SUBSEP effect[i]
+                    next_description[i] = stack_top[stack_key]
                     stack_top[stack_key] = i
                 }
             }
             print header > dedup_out
             print raw_header > dup_out
             for (i = 1; i <= count; i++) {
-                if (keep[i])
+                if (keep[i]) {
                     print record[i] > dedup_out
+                    deduplicate_record_count++
+                }
             }
             for (i = duplicate_event_count; i >= 1; i--)
                 print duplicate_event[i] > dup_out
@@ -4895,11 +4984,16 @@ function deduplicate_changelog_process_fast {
             print "" > dup_out
             clear_repo()
         }
-        BEGIN { clear_repo() }
+        BEGIN {
+            load_metadata()
+            clear_repo()
+        }
         / changed from / {
             process_repo()
             raw_header = $0
             header = clean($0)
+            project_name = header
+            sub(/[[:space:]]+changed from .*/, "", project_name)
             next
         }
         header != "" && /\[[+-]\]/ {
@@ -4910,9 +5004,19 @@ function deduplicate_changelog_process_fast {
             process_repo()
             close(dedup_out)
             close(dup_out)
+            print "origin_records=" (duplicate_record_count + deduplicate_record_count) > stats_out
+      print "duplicate_records=" (duplicate_record_count + 0) > stats_out
+      print "deduplicate_records=" (deduplicate_record_count + 0) > stats_out
+            print "change_id_match_pairs=" (change_match_pair_count + 0) > stats_out
+            print "patch_id_match_pairs=" (patch_match_pair_count + 0) > stats_out
+            print "description_match_pairs=" (description_match_pair_count + 0) > stats_out
+            print "merge_duplicate_records=" (merge_duplicate_count + 0) > stats_out
+            close(stats_out)
         }
     ' "$changelog" || return 1
     echo 100 >"$spin_percent_file"
+    echo -e "\nDeduplicate match summary:"
+    cat "$changelog_process"
     if [[ ${EXEC_PARAMS[@]} =~ 'check' ]]; then
         local origin_count deduplicate_count duplicate_count
         origin_count=$(grep -cE '\[[+-]\]' "$changelog")
@@ -5083,6 +5187,65 @@ owner_close_control_connection() {
         -p 29418 "$GERRIT_USER@$GERRIT_HOST" -O exit >/dev/null 2>&1 || true
 }
 module_hit_table=("sport")
+deduplicate_build_metadata() {
+    local changelog="$1"
+    local output_file="$2"
+    local cache_dir="$3"
+    local repo_root="${4:-${DIT_REPO_ROOT:-}}"
+    local project="" line mark hash project_git patch_id patch_line
+    local -A seen_key
+    local commit_list patch_list
+    : >"$output_file"
+    commit_list=$(mktemp)
+    patch_list=$(mktemp)
+    while IFS= read -r line; do
+        if [[ "$line" == *" changed from "* ]]; then
+            project="${line%% changed from *}"
+            project=$(trim_whitespace "$project")
+            continue
+        fi
+        [[ "$line" =~ \[[+-]\] ]] || continue
+        read -r mark hash _ <<<"$line"
+        local seen_key_name="${project}"$'\t'"${hash}"
+        [[ -z "$hash" || -n "${seen_key[$seen_key_name]:-}" ]] && continue
+        seen_key["$seen_key_name"]=1
+        printf '%s\t%s\n' "$project" "$hash" >>"$commit_list"
+        patch_id=""
+        if [[ -n "$repo_root" && -n "$project" ]]; then
+            project_git="$repo_root/.repo/projects/$project.git"
+            if [[ -d "$project_git" || -f "$project_git" ]]; then
+                patch_line=$(git --git-dir="$project_git" show --format= --no-ext-diff "$hash" 2>/dev/null | git patch-id --stable 2>/dev/null || true)
+                patch_id="${patch_line%% *}"
+            fi
+        fi
+        printf '%s\t%s\t%s\n' "$project" "$hash" "$patch_id" >>"$patch_list"
+    done <"$changelog"
+    awk -F '\t' -v OFS='\t' -v cache_dir="$cache_dir" -v patch_file="$patch_list" '
+        BEGIN {
+            while ((getline line < patch_file) > 0) {
+                split(line, fields, /\t/)
+                patch[fields[1] SUBSEP fields[2]] = fields[3]
+            }
+            close(patch_file)
+        }
+        {
+            project=$1
+            hash=$2
+            change_id=""
+            cache_file=cache_dir "/" hash
+            while ((getline line < cache_file) > 0) {
+                if (line ~ /^[[:space:]]*id:/) {
+                    sub(/^[[:space:]]*id:[[:space:]]*/, "", line)
+                    change_id=line
+                    break
+                }
+            }
+            close(cache_file)
+            print project, hash, change_id, patch[project SUBSEP hash]
+        }
+    ' "$commit_list" >"$output_file"
+    rm -f "$commit_list" "$patch_list"
+}
 function changelog_find_owner {
     local counter=1
     local sub_counter=1
@@ -5094,6 +5257,16 @@ function changelog_find_owner {
     local changelog_error="changelog.error"
     local changelog_out="_out.txt"
     local output_type="txt"
+    local minus_changelog_out=""
+    local plus_changelog_out=""
+    local name_output_dir=""
+    local owner_output_file=""
+    local owner_output_seq=0
+    local -A owner_output_file_by_name=()
+    local -A owner_output_label_by_file=()
+    local -A owner_output_count_by_file=()
+    local -a minus_owner_groups=()
+    local -a plus_owner_groups=()
     read -p "input file: " changelog
     [ ! $changelog ] && changelog="changelog.txt"
     [ ! -f $changelog ] && {
@@ -5104,13 +5277,6 @@ function changelog_find_owner {
     local task_count=$(grep " changed from " $changelog |wc -l)
     start_spin
     [[ ! -d $CHANGELOG_OUT ]] && mkdir $CHANGELOG_OUT
-    [[ ${EXEC_PARAMS[@]} =~ '--deduplicate' ]] && {
-        local deduplicate_changelog="deduplicate.changelog"
-        deduplicate_changelog_process_fast "$changelog" "$deduplicate_changelog"
-        changelog=$CHANGELOG_OUT/$deduplicate_changelog
-        [[ $last_cmd = 'only' ]] && return 0
-        echo -e "\nDeduplicate changelog complete!"
-    }
     echo -e "\nFormatting..."
     [[ ${EXEC_PARAMS[@]} =~ '--out-format' ]] && {
         get_option_index_and_value --out-format
@@ -5195,13 +5361,36 @@ function changelog_find_owner {
         echo "Where,Index,Owner,Commit,Jira" >$changelog_out
     elif [[ "$output_type" == "html" ]]; then
         echo -e "<style>\n  table {\n    border-collapse: collapse;\n    width: 100%;\n    table-layout: fixed;\n  }\n  th, td {\n    text-align: left;\n\
-    padding: 8px;\n    border: 1px solid #ddd;\n    white-space: nowrap;\n    vertical-align: top;\n  }\n  /* Index：只容纳序号，压缩原来没有用途的大块空白。 */\n  th:nth-child(1) {\n    width: 6%;\n    text-align: center;\n  }\n  /* Owner：姓名保持单行，宽度比 Index 稍大。 */\n  th:nth-child(2) {\n    width: 10%;\n  }\n  /* Jira：单号或较长文本可以在单元格内换行。 */\n  th:nth-child(3), td:nth-child(3) {\n    width: 14%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Gerrit：使用主要空间显示提交描述，超长内容继续自动换行。 */\n  th:nth-child(4), td:nth-child(4) {\n    width: 40%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Where：为 40 位节点 hash 预留 30%，窄窗口下允许安全换行。 */\n  th:nth-child(5), td:nth-child(5) {\n    width: 30%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n</style>\n" >$changelog_out
+    padding: 8px;\n    border: 1px solid #ddd;\n    white-space: nowrap;\n    vertical-align: top;\n  }\n  /* Index：只容纳序号，压缩原来没有用途的大块空白。 */\n  th:nth-child(1) {\n    width: 6%;\n    text-align: center;\n  }\n  /* Owner：姓名保持单行，宽度比 Index 稍大。 */\n  th:nth-child(2) {\n    width: 15%;\n  }\n  /* Jira：单号或较长文本可以在单元格内换行。 */\n  th:nth-child(3), td:nth-child(3) {\n    width: 9%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Gerrit：使用主要空间显示提交描述，超长内容继续自动换行。 */\n  th:nth-child(4), td:nth-child(4) {\n    width: 40%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n  /* Where：为 40 位节点 hash 预留 30%，窄窗口下允许安全换行。 */\n  th:nth-child(5), td:nth-child(5) {\n    width: 30%;\n    white-space: normal;\n    overflow-wrap: anywhere;\n    word-break: break-word;\n  }\n</style>\n" >$changelog_out
+        local html_header_tmp="${changelog_out}.charset.tmp"
+        { echo '<meta charset="UTF-8">'; cat "$changelog_out"; } >"$html_header_tmp"
+        mv "$html_header_tmp" "$changelog_out"
         if [ -n "${filter_type:-}" ]; then
             echo -e "<div class="table-title">@$(date) by $GERRIT_USER    #处理类型：${filter_type}</div>" >>$changelog_out
         else
             echo -e "<div class="table-title">@$(date) by $GERRIT_USER</div>" >>$changelog_out
         fi
-        echo -e "<table>\n  <tr>\n    <th>Index</th>\n    <th>Owner</th>\n    <th>Jira</th>\n    <th>Gerrit</th>\n    <th>Where</th>\n  </tr>\n" >>$changelog_out
+        echo -e "<table>\n  <tr>\n    <th>Index</th>\n    <th>Owner</th>\n    <th>Jira</th>\n    <th>Gerrit</th>\n    <th>Where</th>\n  </tr>\n  <tr><td colspan=\"5\"><strong>总笔数：TOTAL_COUNT_PLACEHOLDER</strong></td></tr>\n" >>$changelog_out
+        if [[ ${EXEC_PARAMS[@]} =~ '--deduplicate' ]] || hit_option '--name'; then
+            minus_changelog_out="${changelog_out%.html}_minus.html"
+            plus_changelog_out="${changelog_out%.html}_plus.html"
+            cp "$changelog_out" "$minus_changelog_out"
+            cp "$changelog_out" "$plus_changelog_out"
+        fi
+        if [[ -n "$minus_changelog_out" ]]; then
+            name_output_dir="${changelog_prefix}/.owner_groups"
+            mkdir -p "$name_output_dir"
+        fi
+    fi
+    if hit_option '--name' && [[ "$output_type" != "html" ]]; then
+        local output_ext="${changelog_out##*.}"
+        local output_base="${changelog_out%.*}"
+        minus_changelog_out="${output_base}_minus.${output_ext}"
+        plus_changelog_out="${output_base}_plus.${output_ext}"
+        cp "$changelog_out" "$minus_changelog_out"
+        cp "$changelog_out" "$plus_changelog_out"
+        name_output_dir="${changelog_prefix}/.owner_groups"
+        mkdir -p "$name_output_dir"
     fi
     local OWNER_QUERY_CACHE_DIR="$CHANGELOG_OUT/query_cache"
     local OWNER_QUERY_STATUS_DIR
@@ -5210,6 +5399,28 @@ function changelog_find_owner {
     local OWNER_CONTROL_PATH="/tmp/dit-owner-ssh-${BASHPID}"
     mkdir -p "$OWNER_QUERY_CACHE_DIR"
     touch -d '7 days ago' "$OWNER_QUERY_CACHE_CUTOFF"
+    local deduplicate_metadata_file=""
+    if [[ ${EXEC_PARAMS[@]} =~ '--deduplicate' ]]; then
+        owner_prefetch_commit_queries "$changelog" "$owner_jobs" "$module_hit" "$filter_type"
+        deduplicate_metadata_file=$(mktemp)
+        deduplicate_build_metadata "$changelog" "$deduplicate_metadata_file" "$OWNER_QUERY_CACHE_DIR"
+        local deduplicate_changelog="deduplicate.changelog"
+        deduplicate_changelog_process_fast "$changelog" "$deduplicate_changelog" "$deduplicate_metadata_file" || {
+            rm -f "$deduplicate_metadata_file"
+            owner_close_control_connection
+            return 1
+        }
+        changelog=$CHANGELOG_OUT/$deduplicate_changelog
+        rm -f "$deduplicate_metadata_file"
+        if [[ $last_cmd = 'only' ]]; then
+            owner_close_control_connection
+            find "$OWNER_QUERY_STATUS_DIR" -type f -delete 2>/dev/null
+            rmdir "$OWNER_QUERY_STATUS_DIR" 2>/dev/null || true
+            rm -f "$OWNER_CONTROL_PATH"
+            return 0
+        fi
+        echo -e "\nDeduplicate changelog complete!"
+    fi
     owner_prefetch_commit_queries "$changelog" "$owner_jobs" "$module_hit" "$filter_type"
     local owner_metadata_file="$OWNER_QUERY_STATUS_DIR/query_metadata"
     owner_build_query_metadata_index "$OWNER_QUERY_STATUS_DIR/commit_hashes" "$owner_metadata_file"
@@ -5386,8 +5597,35 @@ function changelog_find_owner {
             [[ ${EXEC_PARAMS[@]} =~ '--assign' ]] && {
                 [[ ! "$owner_name" =~ "$assign_name" ]] && continue
             }
-            [[ -n $project_name_out ]] && echo -e "$project_name_out" >>$changelog_out
+            if [[ -n $project_name_out ]]; then
+                echo -e "$project_name_out" >>$changelog_out
+            fi
             unset project_name_out
+            if [[ -n "$name_output_dir" ]]; then
+                local owner_key owner_group_key owner_group_label
+                if hit_option '--name'; then
+                    owner_key="${owner_name:-Unknown}"
+                    owner_group_label="Owner: $owner_key"
+                else
+                    owner_key="${project_name:-Unknown project}"
+                    owner_group_label="Project: $owner_key"
+                fi
+                owner_group_key="$commit_sign|$owner_key"
+                owner_output_file="${owner_output_file_by_name[$owner_group_key]:-}"
+                if [[ -z "$owner_output_file" ]]; then
+                    ((owner_output_seq++))
+                    owner_output_file="$name_output_dir/group_$(printf '%04d' "$owner_output_seq").rows"
+                    owner_output_file_by_name["$owner_group_key"]="$owner_output_file"
+                    owner_output_label_by_file["$owner_output_file"]="$owner_group_label"
+                    owner_output_count_by_file["$owner_output_file"]=0
+                    if [[ $commit_sign == '-' ]]; then
+                        minus_owner_groups+=("$owner_output_file")
+                    else
+                        plus_owner_groups+=("$owner_output_file")
+                    fi
+                    : >"$owner_output_file"
+                fi
+            fi
             if [[ "$output_type" == "md" || "$output_type" == "table" || "$output_type" == "html" ]]; then
                 pulse_diagnosis $hit_linenum $line_number "hit line-number"
                 [ ! $gerrit_url ] && echo "[gerrit-url]  $counter> $commit_hash" >>$changelog_error && continue
@@ -5407,9 +5645,13 @@ function changelog_find_owner {
                 fi
                 [ $last_cmd = '-v' ] && echo "$counter> [$jira_number] $jira_text  $owner_name"
                 if [[ "$output_type" == "md" ]]; then
-                    echo "* ($sub_counter)  $owner_name [$jira_number](https://jira.huami.com/browse/$jira_number) > [$jira_text]($gerrit_url)" >>$changelog_out
+                    local formatted_output_row="* ($sub_counter)  $owner_name [$jira_number](https://jira.huami.com/browse/$jira_number) > [$jira_text]($gerrit_url)"
+                    echo "$formatted_output_row" >>"$changelog_out"
+                    [[ -n "$owner_output_file" ]] && echo "$formatted_output_row" >>"$owner_output_file"
                 elif [[ "$output_type" == "table" ]]; then
-                    echo "| $commit_where | $sub_counter | $owner_name | [$jira_number](https://jira.huami.com/browse/$jira_number) | [$jira_text]($gerrit_url) |" >>$changelog_out
+                    local formatted_output_row="| $commit_where | $sub_counter | $owner_name | [$jira_number](https://jira.huami.com/browse/$jira_number) | [$jira_text]($gerrit_url) |"
+                    echo "$formatted_output_row" >>"$changelog_out"
+                    [[ -n "$owner_output_file" ]] && echo "$formatted_output_row" >>"$owner_output_file"
                 elif [[ "$output_type" == "html" ]]; then
                     local temp_content="  <tr>\n    <th>${sub_counter}</th>"
                     temp_content+="\n    <th>${owner_name}</th>"
@@ -5418,6 +5660,11 @@ function changelog_find_owner {
                     temp_content+="\n    <th>${commit_where}</th>"
                     temp_content+="\n  </tr>\n"
                     echo -e $temp_content >>$changelog_out
+                    if [[ -n "$owner_output_file" ]]; then
+                        echo -e "$temp_content" >>"$owner_output_file"
+                        local owner_group_count="${owner_output_count_by_file[$owner_output_file]:-0}"
+                        owner_output_count_by_file["$owner_output_file"]=$((owner_group_count + 1))
+                    fi
                 fi
                 ((sub_counter++))
             elif [[ "$output_type" == "csv" ]]; then
@@ -5425,23 +5672,81 @@ function changelog_find_owner {
                 local jira2="${line#*|}"
                 jira2="${jira2%%|*}"
                 local jira_text="$jira1 | $jira2"
-                echo "$commit_where,$sub_counter,$owner_name,$commit_hash,$jira_text" >>$changelog_out
+                local formatted_output_row="$commit_where,$sub_counter,$owner_name,$commit_hash,$jira_text"
+                echo "$formatted_output_row" >>"$changelog_out"
+                [[ -n "$owner_output_file" ]] && echo "$formatted_output_row" >>"$owner_output_file"
                 ((sub_counter++))
             else
                 [[ $last_cmd = '-v' ]] && {
                     pulse_diagnosis $hit_linenum $line_number "hit line-number"
                     echo $counter">: "$commit_hash": "$owner_describe": ["$commit_type"]"
                 }
-                echo "$line" "$owner_describe" >> $changelog_out
+                echo "$line" "$owner_describe" >> "$changelog_out"
+                [[ -n "$owner_output_file" ]] && echo "$line" "$owner_describe" >>"$owner_output_file"
             fi
         }
     done 3< $changelog
     if [[ "$output_type" == "html" ]]; then
+        local combined_total_count=$((sub_counter - 1))
+        sed -i "s/TOTAL_COUNT_PLACEHOLDER/$combined_total_count/" "$changelog_out"
+        if [[ -n "$name_output_dir" ]]; then
+            local owner_group_file
+            local minus_total_count=0
+            local plus_total_count=0
+            for owner_group_file in "${minus_owner_groups[@]}"; do
+                minus_total_count=$((minus_total_count + owner_output_count_by_file[$owner_group_file]))
+            done
+            for owner_group_file in "${plus_owner_groups[@]}"; do
+                plus_total_count=$((plus_total_count + owner_output_count_by_file[$owner_group_file]))
+            done
+            sed -i "s/TOTAL_COUNT_PLACEHOLDER/$minus_total_count/" "$minus_changelog_out"
+            sed -i "s/TOTAL_COUNT_PLACEHOLDER/$plus_total_count/" "$plus_changelog_out"
+            for owner_group_file in "${minus_owner_groups[@]}"; do
+                printf '  <tr><td colspan="5">%s (%s)</td></tr>\n' \
+                    "${owner_output_label_by_file[$owner_group_file]}" \
+                    "${owner_output_count_by_file[$owner_group_file]}" >>"$minus_changelog_out"
+                cat "$owner_group_file" >>"$minus_changelog_out"
+            done
+            for owner_group_file in "${plus_owner_groups[@]}"; do
+                printf '  <tr><td colspan="5">%s (%s)</td></tr>\n' \
+                    "${owner_output_label_by_file[$owner_group_file]}" \
+                    "${owner_output_count_by_file[$owner_group_file]}" >>"$plus_changelog_out"
+                cat "$owner_group_file" >>"$plus_changelog_out"
+            done
+            find "$name_output_dir" -type f -delete 2>/dev/null
+            rmdir "$name_output_dir" 2>/dev/null || true
+        fi
+        local html_output_file
+        for html_output_file in "$changelog_out" "$minus_changelog_out" "$plus_changelog_out"; do
+            [[ -n "$html_output_file" && -f "$html_output_file" ]] || continue
+            if grep -q 'TOTAL_COUNT_PLACEHOLDER' "$html_output_file"; then
+                echo "!! unresolved total-count placeholder in $html_output_file" >&2
+                return 1
+            fi
+        done
         echo "</table>" >>$changelog_out
+        [[ -n "$minus_changelog_out" ]] && echo "</table>" >>"$minus_changelog_out"
+        [[ -n "$plus_changelog_out" ]] && echo "</table>" >>"$plus_changelog_out"
+    fi
+    if [[ "$output_type" != "html" && -n "$name_output_dir" ]]; then
+        local owner_group_file
+        for owner_group_file in "${minus_owner_groups[@]}"; do
+            cat "$owner_group_file" >>"$minus_changelog_out"
+        done
+        for owner_group_file in "${plus_owner_groups[@]}"; do
+            cat "$owner_group_file" >>"$plus_changelog_out"
+        done
+        find "$name_output_dir" -type f -delete 2>/dev/null
+        rmdir "$name_output_dir" 2>/dev/null || true
     fi
     owner_close_control_connection
     mv $changelog_prefix $CHANGELOG_OUT
     echo -e "\nout: $CHANGELOG_OUT/$changelog_out"
+    [[ -n "$minus_changelog_out" ]] && echo "[-] out: $CHANGELOG_OUT/$minus_changelog_out"
+    [[ -n "$plus_changelog_out" ]] && echo "[+] out: $CHANGELOG_OUT/$plus_changelog_out"
+    if hit_option '--name'; then
+        echo "[--name] grouped by owner in the [-]/[+] output files"
+    fi
     [ -f $temp_file ] && rm $temp_file
     find "$OWNER_QUERY_STATUS_DIR" -type f -delete 2>/dev/null
     rmdir "$OWNER_QUERY_STATUS_DIR" 2>/dev/null || true
